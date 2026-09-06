@@ -29,7 +29,7 @@ import {
   sessionDir,
   writeSession,
 } from "./store.js";
-import { eventLine, excerpt, fileStateAt, usageTotals } from "./state.js";
+import { excerpt, fileStateAt, timelineLines, usageTotals } from "./state.js";
 
 const ADAPTERS: Adapter[] = [claudeCodeAdapter];
 
@@ -215,6 +215,7 @@ function cmdLs(opts: Opts): number {
   const widths = cols.map((c) => Math.max(c.length, ...rows.map((r) => r[c].length)));
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(widths[i]!)).join("  "));
   for (const r of rows) console.log(cols.map((c, i) => r[c].padEnd(widths[i]!)).join("  "));
+  console.log("(files = lower bound: structured edits only — shell-driven changes are not tracked)");
   return 0;
 }
 
@@ -267,11 +268,15 @@ function cmdShow(opts: Opts): number {
   const files = fileStateAt(events);
   if (files.size > 0) {
     console.log(
-      `  files       ${files.size} touched via structured edits (shell-driven changes not tracked — SPEC §5.7)`,
+      `  files       >=${files.size} touched — a lower bound: only structured edits are tracked, shell-driven changes are not (SPEC §5.7)`,
     );
     for (const f of files.values()) {
+      const diverged =
+        f.divergedAtSeq !== undefined
+          ? `  [DIVERGED at seq ${f.divergedAtSeq}: content changed outside structured edits]`
+          : "";
       console.log(
-        `    ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed}, ${f.edits} edit${f.edits === 1 ? "" : "s"})`,
+        `    ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed}, ${f.edits} edit${f.edits === 1 ? "" : "s"})${diverged}`,
       );
     }
   }
@@ -306,8 +311,7 @@ async function cmdReplay(opts: Opts): Promise<number> {
   const events = readSessionEvents(opts.dir, id);
 
   if (opts.timeline || (opts.at === undefined && !process.stdin.isTTY)) {
-    for (const e of events)
-      console.log(`${String(e.seq).padStart(5)}  ${e.ts.slice(11, 19)}  ${eventLine(e)}`);
+    for (const line of timelineLines(events)) console.log(line);
     return 0;
   }
 
@@ -572,11 +576,17 @@ function printStateAt(events: AgitEvent[], seq: number): void {
     console.log("  no structured file edits yet");
   } else {
     for (const f of files.values()) {
+      const diverged =
+        f.divergedAtSeq !== undefined && f.divergedAtSeq <= seq
+          ? `  [DIVERGED at seq ${f.divergedAtSeq}]`
+          : "";
       console.log(
-        `  ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed})  content sha256 ${f.afterHash.slice(0, 12)} @ seq ${f.lastSeq}`,
+        `  ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed})  content sha256 ${f.afterHash.slice(0, 12)} @ seq ${f.lastSeq}${diverged}`,
       );
     }
-    console.log("  (structured edits only — shell-driven changes are invisible here, SPEC §5.7)");
+    console.log(
+      "  (lower bound: structured edits only — shell-driven changes are invisible here, SPEC §5.7)",
+    );
   }
 }
 

@@ -13,6 +13,13 @@ export interface FileState {
   edits: number;
   added: number;
   removed: number;
+  /**
+   * Seq of the first structured edit whose beforeHash contradicted the last
+   * known content hash — cryptographic proof the file was modified outside
+   * structured edits somewhere in between (a shell command, the user, another
+   * process). Undefined means "no contradiction observed", not "unchanged".
+   */
+  divergedAtSeq?: number;
 }
 
 /** Fold file.diff events up to and including seq `at` (default: all). Lower bound on reality — SPEC §5.7. */
@@ -21,10 +28,12 @@ export function fileStateAt(events: AgitEvent[], at?: number): Map<string, FileS
   for (const e of events) {
     if (at !== undefined && e.seq > at) break;
     if (e.type !== "file.diff") continue;
-    const p = e.payload as { path?: Json; kind?: Json; afterHash?: Json; diff?: Json };
+    const p = e.payload as { path?: Json; kind?: Json; afterHash?: Json; beforeHash?: Json; diff?: Json };
     if (typeof p.path !== "string" || typeof p.afterHash !== "string") continue;
     const { added, removed } = diffStat(typeof p.diff === "string" ? p.diff : "");
     const prev = files.get(p.path);
+    const contradicted =
+      prev !== undefined && typeof p.beforeHash === "string" && p.beforeHash !== prev.afterHash;
     files.set(p.path, {
       path: p.path,
       kind: prev ? prev.kind : p.kind === "create" ? "create" : "modify",
@@ -33,9 +42,31 @@ export function fileStateAt(events: AgitEvent[], at?: number): Map<string, FileS
       edits: (prev?.edits ?? 0) + 1,
       added: (prev?.added ?? 0) + added,
       removed: (prev?.removed ?? 0) + removed,
+      divergedAtSeq: prev?.divergedAtSeq ?? (contradicted ? e.seq : undefined),
     });
   }
   return files;
+}
+
+/**
+ * Timeline rows for a session, one line per event — with a date separator
+ * whenever the (UTC) date changes, so a multi-day session never reads
+ * 23:59 -> 00:03 as if seconds passed. Single-day sessions get no separators.
+ */
+export function timelineLines(events: AgitEvent[]): string[] {
+  const out: string[] = [];
+  if (events.length === 0) return out;
+  const spansDays = events[0]!.ts.slice(0, 10) !== events[events.length - 1]!.ts.slice(0, 10);
+  let currentDate = "";
+  for (const e of events) {
+    const date = e.ts.slice(0, 10);
+    if (spansDays && date !== currentDate) {
+      out.push(`       ────── ${date} ──────`);
+      currentDate = date;
+    }
+    out.push(`${String(e.seq).padStart(5)}  ${e.ts.slice(11, 19)}  ${eventLine(e)}`);
+  }
+  return out;
 }
 
 export function diffStat(diff: string): { added: number; removed: number } {

@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { claudeCodeAdapter } from "../src/adapters/claude-code.js";
 import { buildChain } from "../src/format/hash.js";
-import { fileStateAt, usageTotals } from "../src/state.js";
+import type { DraftEvent } from "../src/format/events.js";
+import { fileStateAt, timelineLines, usageTotals } from "../src/state.js";
 
 const FIXTURE = join(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -33,6 +34,50 @@ describe("replay state folds", () => {
     expect(atEnd.lastSeq).toBe(11);
     expect(atEnd.added).toBeGreaterThan(0);
     expect(atEnd.removed).toBeGreaterThan(0);
+  });
+
+  it("flags divergence when a beforeHash contradicts the last known content", () => {
+    const diff = (ts: string, beforeHash: string | null, afterHash: string): DraftEvent => ({
+      ts,
+      type: "file.diff",
+      payload: {
+        path: "C:\\p\\a.ts",
+        kind: beforeHash === null ? "create" : "modify",
+        diff: "",
+        beforeHash,
+        afterHash,
+        toolUseId: "t",
+        source: "Edit",
+      },
+    });
+    // create -> consistent edit -> edit whose before contradicts the last after
+    const evs = buildChain("s", [
+      diff("2026-01-01T00:00:00.000Z", null, "h1"),
+      diff("2026-01-01T00:00:01.000Z", "h1", "h2"),
+      diff("2026-01-01T00:00:02.000Z", "hX", "h3"),
+    ]);
+    const clean = fileStateAt(evs, 1).get("C:\\p\\a.ts")!;
+    expect(clean.divergedAtSeq).toBeUndefined();
+    const state = fileStateAt(evs).get("C:\\p\\a.ts")!;
+    expect(state.divergedAtSeq).toBe(2); // proof: something changed a.ts between seq 1 and 2
+    expect(state.afterHash).toBe("h3");
+  });
+
+  it("timeline shows date separators only when a session spans days", () => {
+    const singleDay = timelineLines(events);
+    expect(singleDay.some((l) => l.includes("──────"))).toBe(false);
+    expect(singleDay).toHaveLength(events.length);
+
+    const twoDays = buildChain("s", [
+      { ts: "2026-01-01T23:59:00.000Z", type: "message.user", payload: { text: "late" } },
+      { ts: "2026-01-02T00:03:00.000Z", type: "message.user", payload: { text: "past midnight" } },
+      { ts: "2026-01-02T09:00:00.000Z", type: "message.user", payload: { text: "morning" } },
+    ]);
+    const lines2 = timelineLines(twoDays);
+    expect(lines2).toHaveLength(5); // 3 rows + 2 separators
+    expect(lines2[0]).toContain("2026-01-01");
+    expect(lines2[2]).toContain("2026-01-02");
+    expect(lines2.filter((l) => l.includes("──────"))).toHaveLength(2);
   });
 
   it("usage totals accumulate and respect the cutoff", () => {
