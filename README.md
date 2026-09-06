@@ -11,6 +11,10 @@ native log into an append-only, hash-chained JSONL event log — and every
 feature is a view over that log. agit does not build an agent; it sits above
 every agent, the way git sits above every editor.
 
+![agit importing, verifying, and replaying a session](docs/demo.svg)
+
+*(a synthetic fixture session — real ones look the same, only longer)*
+
 Not on npm yet — the `agitsh` package name is reserved for the first
 release. Until then, install from source:
 
