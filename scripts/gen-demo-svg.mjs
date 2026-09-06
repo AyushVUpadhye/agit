@@ -9,9 +9,11 @@
  * cuts, reveal timing, and color (event-type chips, diff +/-, the DIVERGED
  * highlight) — the same coloring the share page applies to the same data.
  *
- * Why SVG for the README: GitHub wraps animated GIFs in a play/pause
- * control that shows a play button to reduced-motion viewers; SVG in an
- * <img> is never wrapped, always autoplays, and stays crisp at any width.
+ * NOT the README embed: GitHub's camo pipeline strips <style> keyframe
+ * animation out of SVGs in READMEs, freezing this to its blank base frame —
+ * the README embeds docs/demo.gif instead (scripts/record-demo.mjs). This
+ * generator stays for contexts that do render SVG animation: local viewing,
+ * docs sites, social cards.
  *
  * Usage: npm run build && node scripts/gen-demo-svg.mjs
  */
