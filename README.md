@@ -12,7 +12,7 @@ native log into an append-only, hash-chained JSONL event log — and every
 feature is a view over that log. agit does not build an agent; it sits above
 every agent, the way git sits above every editor.
 
-![agit importing, verifying, and replaying a session](docs/demo.svg)
+![agit importing, verifying, and replaying a session — ending on a [DIVERGED] file-state proof](docs/demo.gif)
 
 *(a synthetic fixture session — real ones look the same, only longer)*
 
@@ -40,9 +40,9 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
 - **`agit verify <id>`** — validate the hash chain; reports the first broken
   link, and detects truncation via `meta.json`.
 - **`agit replay <id>`** — step through events (`n`/`p`/`g N`), inspect any
-  event, and show cumulative file state at any point (`s`). `--at N` jumps
-  straight to event N; `--timeline` prints the whole session one line per
-  event.
+  event, and show cumulative file state at any point (`s`, or `--at N
+  --state` non-interactively). `--at N` jumps straight to event N;
+  `--timeline` prints the whole session one line per event.
 - **`agit share <id | native.jsonl>`** — share a session through a relay,
   **live while the agent is still running**: the CLI tails the native log
   and streams events; teammates watch in a browser (timeline, diffs, token
