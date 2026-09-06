@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { redactDeep, redactString, type RedactionCounts } from "../src/redact.js";
 
+// Credential fixtures are assembled at runtime from concatenated fragments so
+// that no string literal in this source file matches a real credential
+// format. GitHub secret scanning (deliberately NOT path-excluded for test/)
+// would otherwise flag every real-format fixture as a leaked key — a fresh
+// false positive for each new pattern this suite covers. The matchable
+// string only ever exists in memory. Split inside the provider prefix
+// (sk- + ant-, AK + IA, gh + p_, ...) so no fragment carries the signature.
+const joined = (...parts: string[]) => parts.join("");
+
+const K = {
+  anthropic: joined("sk-", "ant-", "api03-AAAABBBBCCCCDDDD1234"),
+  anthropic2: joined("sk-", "ant-", "XXXXYYYYZZZZWWWW1234"),
+  openaiProj: joined("sk-", "proj-", "AAAABBBBCCCCDDDDEEEE1234"),
+  openaiBare: joined("sk-", "AAAABBBBCCCCDDDDEEEE12"),
+  aws: joined("AK", "IA", "IOSFODNN7EXAMPLE"),
+  ghp: joined("gh", "p_", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
+  ghPat: joined("github_", "pat_", "ABCDEFGHIJKLMNOPQRSTUV0123"),
+  slack: joined("xo", "xb-", "1234567890-abcdef"),
+  google: joined("AI", "za", "SyA1234567890abcdefghijklmnopqrstuv"),
+  jwt: joined("ey", "JhbGciOiJIUzI1NiJ9.", "ey", "JzdWIiOiIxMjM0In0.", "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV"),
+  pem: joined("-----BEGIN RSA ", "PRIVATE KEY-----", "\nMIIabc\nxyz\n", "-----END RSA ", "PRIVATE KEY-----"),
+};
+
 function run(s: string): { out: string; counts: RedactionCounts } {
   const counts: RedactionCounts = {};
   return { out: redactString(s, counts), counts };
@@ -8,44 +31,40 @@ function run(s: string): { out: string; counts: RedactionCounts } {
 
 describe("redaction (SPEC §8)", () => {
   it("anthropic key", () => {
-    const { out, counts } = run("key=sk-ant-api03-AAAABBBBCCCCDDDD1234 end");
+    const { out, counts } = run(`key=${K.anthropic} end`);
     expect(out).toBe("key=[REDACTED:anthropic-key] end");
     expect(counts["anthropic-key"]).toBe(1);
   });
 
   it("openai key, without eating anthropic keys first", () => {
-    const { out } = run("sk-proj-AAAABBBBCCCCDDDDEEEE1234");
-    expect(out).toBe("[REDACTED:openai-key]");
-    const both = run("a sk-ant-XXXXYYYYZZZZWWWW1234 b sk-AAAABBBBCCCCDDDDEEEE12 c");
+    expect(run(K.openaiProj).out).toBe("[REDACTED:openai-key]");
+    const both = run(`a ${K.anthropic2} b ${K.openaiBare} c`);
     expect(both.out).toBe("a [REDACTED:anthropic-key] b [REDACTED:openai-key] c");
   });
 
   it("aws access key id", () => {
-    expect(run("AKIAIOSFODNN7EXAMPLE").out).toBe("[REDACTED:aws-access-key-id]");
+    expect(run(K.aws).out).toBe("[REDACTED:aws-access-key-id]");
   });
 
   it("github tokens, both shapes", () => {
-    expect(run("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").out).toBe("[REDACTED:github-token]");
-    expect(run("github_pat_ABCDEFGHIJKLMNOPQRSTUV0123").out).toBe("[REDACTED:github-token]");
+    expect(run(K.ghp).out).toBe("[REDACTED:github-token]");
+    expect(run(K.ghPat).out).toBe("[REDACTED:github-token]");
   });
 
   it("slack token", () => {
-    expect(run("xoxb-1234567890-abcdef").out).toBe("[REDACTED:slack-token]");
+    expect(run(K.slack).out).toBe("[REDACTED:slack-token]");
   });
 
   it("google api key", () => {
-    expect(run("AIzaSyA1234567890abcdefghijklmnopqrstuv").out).toBe("[REDACTED:google-api-key]");
+    expect(run(K.google).out).toBe("[REDACTED:google-api-key]");
   });
 
   it("private key block", () => {
-    const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIabc\nxyz\n-----END RSA PRIVATE KEY-----";
-    expect(run(`before\n${pem}\nafter`).out).toBe("before\n[REDACTED:private-key]\nafter");
+    expect(run(`before\n${K.pem}\nafter`).out).toBe("before\n[REDACTED:private-key]\nafter");
   });
 
   it("jwt", () => {
-    expect(run("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV").out).toBe(
-      "[REDACTED:jwt]",
-    );
+    expect(run(K.jwt).out).toBe("[REDACTED:jwt]");
   });
 
   it("bearer", () => {
@@ -64,7 +83,7 @@ describe("redaction (SPEC §8)", () => {
 
   it("redactDeep walks nested payloads and counts", () => {
     const counts: RedactionCounts = {};
-    const out = redactDeep({ a: ["xoxb-1234567890-abcdef", { b: "AKIAIOSFODNN7EXAMPLE" }], n: 3 }, counts);
+    const out = redactDeep({ a: [K.slack, { b: K.aws }], n: 3 }, counts);
     expect(out).toEqual({ a: ["[REDACTED:slack-token]", { b: "[REDACTED:aws-access-key-id]" }], n: 3 });
     expect(counts).toEqual({ "slack-token": 1, "aws-access-key-id": 1 });
   });
