@@ -9,6 +9,10 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
+  {
     rules: {
       // Non-null assertions are used deliberately after explicit bounds/shape
       // checks throughout (noUncheckedIndexedAccess is on in tsconfig, which

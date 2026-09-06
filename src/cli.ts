@@ -40,7 +40,8 @@ usage:
   agit ls                              list imported sessions
   agit show <id>                       summarize one session
   agit verify <id>                     validate the hash chain
-  agit replay <id> [--at N]            step through events; --at jumps to N
+  agit replay <id> [--at N] [--state]  step through events; --at jumps to N,
+                                       --state prints file state at that point
   agit replay <id> --timeline          print the whole timeline, one line per event
   agit export <id> [--json]            write the event log to stdout — JSONL, or a
                                        JSON array with --json — for other tools
@@ -62,6 +63,7 @@ interface Opts {
   dir: string;
   at?: number;
   timeline: boolean;
+  state: boolean;
   json: boolean;
   relay: string;
   ttlHours?: number;
@@ -75,6 +77,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
   const opts: Opts = {
     dir: process.cwd(),
     timeline: false,
+    state: false,
     json: false,
     relay: process.env.AGIT_RELAY ?? "http://127.0.0.1:7717",
     static: false,
@@ -86,6 +89,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     if (a === "--dir") opts.dir = resolve(argv[++i] ?? ".");
     else if (a === "--at") opts.at = Number(argv[++i]);
     else if (a === "--timeline") opts.timeline = true;
+    else if (a === "--state") opts.state = true;
     else if (a === "--json") opts.json = true;
     else if (a === "--relay") opts.relay = argv[++i] ?? opts.relay;
     else if (a === "--ttl") opts.ttlHours = Number(argv[++i]);
@@ -317,6 +321,7 @@ async function cmdReplay(opts: Opts): Promise<number> {
 
   let pos = clamp(opts.at ?? 0, 0, events.length - 1);
   printEventDetail(events, pos);
+  if (opts.state) printStateAt(events, pos);
   if (opts.at !== undefined && !process.stdin.isTTY) return 0;
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -559,7 +564,7 @@ function printEventDetail(events: AgitEvent[], seq: number): void {
       break;
     case "file.diff":
       console.log(`  ${p.kind} ${p.path}`);
-      console.log(`  before ${p.beforeHash ?? "∅"}  after ${p.afterHash}`);
+      console.log(`  before ${short(p.beforeHash)}  after ${short(p.afterHash)}`);
       console.log(indentClip(String(p.diff ?? ""), 40));
       break;
     default:
@@ -595,6 +600,11 @@ function indentClip(text: string, maxLines: number): string {
   const shown = lines.slice(0, maxLines).map((l) => "  " + excerpt(l, 160));
   if (lines.length > maxLines) shown.push(`  … ${lines.length - maxLines} more lines`);
   return shown.join("\n");
+}
+
+/** Hashes render truncated in views; full values live in the log (agit export). */
+function short(h: unknown): string {
+  return typeof h === "string" ? h.slice(0, 12) : "∅";
 }
 
 function requireId(opts: Opts): string {
