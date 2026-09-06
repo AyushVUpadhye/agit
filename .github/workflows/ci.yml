@@ -29,7 +29,8 @@ jobs:
       - run: npm run build
       - run: npm test
 
-  typecheck:
+  checks:
+    name: typecheck · lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,4 +39,28 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
+      - run: npm run lint
+
+  # The project's own guarantee, exercised through the real CLI: importing the
+  # committed fixture must produce a valid hash chain AND byte-identical output
+  # to the committed golden log. Catches any refactor that silently changes
+  # canonical serialization, hashing, redaction, or the adapter mapping.
+  verify-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: import fixture and verify its chain
+        run: |
+          node dist/cli.js import fixtures/claude-code/simple.jsonl --dir /tmp/agit-ci
+          node dist/cli.js verify fixture-simple-0001 --dir /tmp/agit-ci
+      - name: compare against the committed golden log
+        run: |
+          diff /tmp/agit-ci/.agit/sessions/fixture-simple-0001/events.jsonl \
+               fixtures/claude-code/simple.golden.jsonl
