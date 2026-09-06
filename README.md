@@ -1,5 +1,7 @@
 # agit — git for running agents
 
+[![ci](https://github.com/thegoodengineers/agit/actions/workflows/ci.yml/badge.svg)](https://github.com/thegoodengineers/agit/actions/workflows/ci.yml)
+
 An AI coding session is trapped: one terminal, one machine, a proprietary log
 format, one pair of eyes. When it ends you're left with changed files and a
 scrollback buffer.
@@ -9,8 +11,12 @@ native log into an append-only, hash-chained JSONL event log — and every
 feature is a view over that log. agit does not build an agent; it sits above
 every agent, the way git sits above every editor.
 
+Not on npm yet — the `agitsh` package name is reserved for the first
+release. Until then, install from source:
+
 ```
-npm install -g agitsh
+git clone https://github.com/thegoodengineers/agit && cd agit
+npm ci && npm run build && npm link   # `agit` is now on your PATH
 ```
 
 ## What works today
