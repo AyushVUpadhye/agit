@@ -7,6 +7,20 @@ Notable changes to agit. The event format itself is versioned separately
 
 ### Added
 
+### Fixed (community PRs #15–#18, first outside contributions)
+
+- Session ids from native logs are rejected unless directory-safe — a
+  crafted log can no longer path-traverse out of .agit/sessions on import.
+- The unified-diff applier treats a bare empty context line strictly: it
+  must match an empty base line (was silently skipped on mismatch), and
+  hunk-trailing empty lines are no longer dropped by value.
+- The relay chat rate limit is per sender per share, so one viewer can no
+  longer silence everyone else's messages.
+- Redaction covers Stripe keys, npm tokens, Slack webhooks, URL-embedded
+  credentials, and — the big one — prefixed/SCREAMING_SNAKE_CASE assignment
+  keys like DB_PASSWORD, which word-boundary matching always missed
+  (SPEC section 8 table updated to match).
+
 - **Writer resume** (share protocol v0): a live share survives its CLI.
   Credentials persist under `.agit/shares/` while a live share runs; the
   relay's new `/head` endpoint reports where its chain ends; and
