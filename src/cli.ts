@@ -42,6 +42,8 @@ usage:
   agit verify <id>                     validate the hash chain
   agit replay <id> [--at N]            step through events; --at jumps to N
   agit replay <id> --timeline          print the whole timeline, one line per event
+  agit export <id> [--json]            write the event log to stdout — JSONL, or a
+                                       JSON array with --json — for other tools
   agit share <id | native.jsonl>       share a session through a relay — live if it
                                        is still running; viewer messages land here
   agit relay                           run a relay (self-hosted, in-memory)
@@ -60,6 +62,7 @@ interface Opts {
   dir: string;
   at?: number;
   timeline: boolean;
+  json: boolean;
   relay: string;
   ttlHours?: number;
   static: boolean;
@@ -72,6 +75,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
   const opts: Opts = {
     dir: process.cwd(),
     timeline: false,
+    json: false,
     relay: process.env.AGIT_RELAY ?? "http://127.0.0.1:7717",
     static: false,
     args: [],
@@ -82,6 +86,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     if (a === "--dir") opts.dir = resolve(argv[++i] ?? ".");
     else if (a === "--at") opts.at = Number(argv[++i]);
     else if (a === "--timeline") opts.timeline = true;
+    else if (a === "--json") opts.json = true;
     else if (a === "--relay") opts.relay = argv[++i] ?? opts.relay;
     else if (a === "--ttl") opts.ttlHours = Number(argv[++i]);
     else if (a === "--static") opts.static = true;
@@ -108,6 +113,8 @@ async function main(): Promise<number> {
       return cmdVerify(opts);
     case "replay":
       return cmdReplay(opts);
+    case "export":
+      return cmdExport(opts);
     case "share":
       return cmdShare(opts);
     case "relay":
@@ -326,6 +333,18 @@ async function cmdReplay(opts: Opts): Promise<number> {
     printEventDetail(events, pos);
   }
   rl.close();
+  return 0;
+}
+
+/** The format for everyone else: the log to stdout, no CLI linkage required. */
+function cmdExport(opts: Opts): number {
+  const id = requireId(opts);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(readSessionEvents(opts.dir, id), null, 2) + "\n");
+  } else {
+    // JSONL: the stored log verbatim, hash chain intact — pipe it anywhere.
+    for (const line of readSessionLines(opts.dir, id)) process.stdout.write(line + "\n");
+  }
   return 0;
 }
 
