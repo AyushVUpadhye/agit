@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: every job only checks out and reads the repo. If a job
+# ever needs more (SARIF upload, PR comments), grant it at that job's level.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: node ${{ matrix.node }} · ${{ matrix.os }}
