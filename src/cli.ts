@@ -2,13 +2,14 @@
 /** agit — git for running agents. Local verbs only (roadmap milestone 1). */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { claudeCodeAdapter } from "./adapters/claude-code.js";
 import type { Adapter } from "./adapters/adapter.js";
 import { buildChain, sha256Hex, toJsonl } from "./format/hash.js";
 import { verifyChain } from "./format/verify.js";
 import type { AgitEvent, SessionMeta } from "./format/events.js";
+import { writeFork } from "./fork.js";
 import { redactDeep, type RedactionCounts } from "./redact.js";
 import { startRelay } from "./relay/relay.js";
 import {
@@ -45,12 +46,15 @@ usage:
   agit replay <id> --timeline          print the whole timeline, one line per event
   agit export <id> [--json]            write the event log to stdout — JSONL, or a
                                        JSON array with --json — for other tools
+  agit fork <id> --at N [--out DIR]    branch at event N: reconstruct the file tree
+                                       (hash-verified) and write a context seed
   agit share <id | native.jsonl>       share a session through a relay — live if it
                                        is still running; viewer messages land here
   agit relay                           run a relay (self-hosted, in-memory)
 
 options:
   --dir <path>     where .agit/ lives (default: current directory)
+  --out <dir>      fork: where to write tree/, SEED.md, fork.json
   --relay <url>    relay to share through (default: $AGIT_RELAY or http://127.0.0.1:7717)
   --ttl <hours>    how long the share link lives (default 24h, max 168h)
   --static         share the log as it is now; do not tail for growth
@@ -65,6 +69,7 @@ interface Opts {
   timeline: boolean;
   state: boolean;
   json: boolean;
+  out?: string;
   relay: string;
   ttlHours?: number;
   static: boolean;
@@ -90,6 +95,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     else if (a === "--at") opts.at = Number(argv[++i]);
     else if (a === "--timeline") opts.timeline = true;
     else if (a === "--state") opts.state = true;
+    else if (a === "--out") opts.out = argv[++i];
     else if (a === "--json") opts.json = true;
     else if (a === "--relay") opts.relay = argv[++i] ?? opts.relay;
     else if (a === "--ttl") opts.ttlHours = Number(argv[++i]);
@@ -119,6 +125,8 @@ async function main(): Promise<number> {
       return cmdReplay(opts);
     case "export":
       return cmdExport(opts);
+    case "fork":
+      return cmdFork(opts);
     case "share":
       return cmdShare(opts);
     case "relay":
@@ -342,6 +350,53 @@ async function cmdReplay(opts: Opts): Promise<number> {
     printEventDetail(events, pos);
   }
   rl.close();
+  return 0;
+}
+
+function cmdFork(opts: Opts): number {
+  const id = requireId(opts);
+  const events = readSessionEvents(opts.dir, id);
+  if (opts.at === undefined || !Number.isInteger(opts.at)) {
+    console.error("usage: agit fork <id> --at N [--out DIR]  (N = event to branch from)");
+    return 2;
+  }
+  if (opts.at < 0 || opts.at >= events.length) {
+    console.error(`--at ${opts.at} is outside this session (0..${events.length - 1})`);
+    return 2;
+  }
+  // Never fork an unverified prefix: the fork point hash is a provenance claim.
+  const check = verifyChain(readSessionLines(opts.dir, id));
+  if (!check.ok) {
+    const why = check.firstBroken
+      ? `event ${check.firstBroken.seq}: ${check.firstBroken.reason}`
+      : "broken chain";
+    console.error(`refusing to fork: chain verification failed — ${why}`);
+    return 1;
+  }
+
+  const outDir = resolve(opts.out ?? `agit-fork-${id.slice(0, 8)}-at${opts.at}`);
+  if (existsSync(outDir)) {
+    console.error(`refusing to write into existing ${outDir} — pass a fresh --out`);
+    return 1;
+  }
+  const res = writeFork(events, opts.at, id, outDir);
+
+  console.log(`forked ${id} at event ${opts.at} (${events[opts.at]!.hash.slice(0, 12)})`);
+  const recovered = res.written.filter((w) => w.recovered).length;
+  console.log(
+    `  tree        ${res.written.length} file${res.written.length === 1 ? "" : "s"} written, every one verified against its event hash` +
+      (recovered > 0 ? ` (${recovered} recovered via runtime-recorded pre-edit content)` : ""),
+  );
+  for (const w of res.written) console.log(`    ${w.rel}${w.recovered ? "  [recovered]" : ""}`);
+  if (res.skipped.length > 0) {
+    console.log(`  skipped     ${res.skipped.length} not reconstructible:`);
+    for (const skip of res.skipped) console.log(`    ${skip.path}: ${skip.reason}`);
+  }
+  console.log(
+    `  seed        ${join(outDir, "SEED.md")} — open your agent in ${join(outDir, "tree")} with this as the first prompt`,
+  );
+  console.log(`  parentage   ${join(outDir, "fork.json")}`);
+  console.log("  (the tree reflects structured edits only; shell-driven changes were invisible to the log)");
   return 0;
 }
 

@@ -3,6 +3,20 @@
 Notable changes to agit. The event format itself is versioned separately
 (SPEC.md §11); a spec bump is always called out here in bold.
 
+## Unreleased
+
+### Added
+
+- **`agit fork <id> --at N`** (milestone 3, part 1): branch a session at any
+  event. Hash-verified file-tree reconstruction (diff replay + recovery from
+  runtime-recorded pre-edit content), a deterministic `SEED.md` context
+  summary, and `fork.json` provenance. Honestly lossy by design.
+- `agit replay --state` prints file state non-interactively; timelines show
+  date separators on multi-day sessions; file counts everywhere are labeled
+  as the lower bounds they are, and `[DIVERGED at seq N]` marks files
+  provably modified outside structured edits.
+- `agit export` (JSONL or `--json`).
+
 ## 0.1.0 — 2026-09-06
 
 Initial release: the format, one adapter, local inspection, live sharing.

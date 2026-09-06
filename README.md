@@ -44,6 +44,15 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
   event, and show cumulative file state at any point (`s`, or `--at N
   --state` non-interactively). `--at N` jumps straight to event N;
   `--timeline` prints the whole session one line per event.
+- **`agit fork <id> --at N`** — branch a session at event N. The file tree
+  is reconstructed from the log and **verified**: every replayed diff must
+  reproduce its event's content hash, broken chains recover from
+  runtime-recorded pre-edit content where it exists, and whatever cannot be
+  verified is listed instead of written. Context is honestly lossy: the
+  fork gets `SEED.md`, a deterministic mechanical summary (provenance,
+  the task, last exchanges, file state) — not a transplant of the agent's
+  mind. `fork.json` records the source session and fork-point hash, so
+  provenance is checkable with `agit verify`.
 - **`agit share <id | native.jsonl>`** — share a session through a relay,
   **live while the agent is still running**: the CLI tails the native log
   and streams events; teammates watch in a browser (timeline, diffs, token
@@ -91,10 +100,10 @@ Said plainly:
   until the link expires.
 - **No TLS in the relay.** It binds loopback by default; exposing it to a
   network means putting a TLS proxy or tunnel in front (PROTOCOL.md).
-- **No `fork`, `merge`, or `pr`.** Roadmap milestone 3. When they land: fork
-  will be honestly lossy (file state replays; agent context is summarized,
-  not transplanted), merge will be file-level git merge plus a written
-  summary — not a merge of two minds.
+- **No `merge` or `pr` yet.** Roadmap milestone 3, second half. Merge will
+  be file-level three-way merge from the fork point plus a written summary —
+  not a merge of two minds. Fork's context seeding is a summary by design;
+  you cannot inject history into a running agent.
 - **Redaction is a seatbelt, not a guarantee.** Session logs contain whatever
   the agent saw. Before sharing one anywhere, read it.
 
