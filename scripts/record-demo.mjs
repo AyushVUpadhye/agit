@@ -52,23 +52,25 @@ function run(args, input) {
   return (r.stdout ?? "") + (r.stderr ?? "");
 }
 
-function cmd(display, args, { pause = 1.3, lineDelay = 0.04, input, instant = false } = {}) {
+function cmd(display, args, { pause = 1.3, lineDelay = 0.04, input, poster = false } = {}) {
   out(PROMPT);
-  if (instant) {
-    // The very first frame opens on the command itself, never a bare cursor.
-    out(display);
-    t += 0.7;
+  if (poster) {
+    // Poster mode: the command AND its output land in the very first frame.
+    // GitHub wraps animated GIFs in a play/pause control, and viewers with
+    // autoplay disabled see only frame 1 — it must be a real poster, not a
+    // bare cursor or a lone command line.
+    out(display + "\r\n");
   } else {
     type(display);
     t += 0.4;
+    out("\r\n");
+    t += 0.12;
   }
-  out("\r\n");
-  t += 0.12;
   const lines = crlf(run(args, input)).split("\r\n");
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   for (const line of lines) {
     out(line + "\r\n");
-    t += lineDelay;
+    if (!poster) t += lineDelay;
   }
   t += pause;
 }
@@ -76,7 +78,7 @@ function cmd(display, args, { pause = 1.3, lineDelay = 0.04, input, instant = fa
 // The storyboard leads with the payoff: import, then straight to the
 // divergent diff + file state proof ([DIVERGED]) while the reader is still
 // watching, then a verify beat, then the full timeline as closing context.
-cmd("agit import fixtures/claude-code/demo.jsonl", ["import", FIXTURE], { pause: 1.2, instant: true });
+cmd("agit import fixtures/claude-code/demo.jsonl", ["import", FIXTURE], { pause: 2.4, poster: true });
 cmd("agit replay demo --at 24 --state", ["replay", "demo", "--at", "24", "--state"], {
   pause: 3.0,
   input: "",
