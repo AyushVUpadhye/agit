@@ -70,7 +70,7 @@ Shares live in relay memory only; nothing touches disk. A share dies at its
 TTL (default 24h, max 7d), or 30 minutes after the sharer ends it (grace for
 late viewers), whichever comes first — the reaper closes all streams and
 drops the buffer. Defaults: 200 concurrent shares, 200k events per share,
-25MB per push, 4000-char messages, 30 messages/minute per share.
+25MB per push, 4000-char messages, 30 messages/minute per sender per share (the message endpoint is unauthenticated, so the budget must isolate senders).
 
 ## Writer resume
 

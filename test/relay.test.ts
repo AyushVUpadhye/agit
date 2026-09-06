@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -158,6 +159,27 @@ describe("relay protocol v0", () => {
     expect((await getShareHead(base, share)).ended).toBe(true);
   });
 
+  it("rate-limits the unauthenticated /message endpoint per sender, not per share", async () => {
+    // The endpoint has no auth (any viewer with the link can post), so the
+    // limit must isolate senders: one viewer hammering it must not silence
+    // every other viewer's ability to message the sharer.
+    const share = await createShare(base);
+    const send = (localAddress: string, text: string) => postMessage(base, share.shareId, localAddress, text);
+
+    for (let i = 0; i < 30; i++) {
+      const res = await send("127.0.0.1", `spam ${i}`);
+      expect(res.status).toBe(200);
+    }
+    const blocked = await send("127.0.0.1", "one too many");
+    expect(blocked.status).toBe(429);
+
+    // A different sender (distinct loopback address) has its own budget.
+    const other = await send("127.0.0.2", "hi from someone else");
+    expect(other.status).toBe(200);
+
+    await endShare(base, share);
+  });
+
   it("404s unknown shares and refuses pushes after end", async () => {
     const missing = await fetch(`${base}/api/shares/${"A".repeat(22)}/events.jsonl`);
     expect(missing.status).toBe(404);
@@ -178,6 +200,35 @@ describe("relay protocol v0", () => {
     await endShare(base, share);
   });
 });
+
+/** POST /message from a chosen local (source) address, to simulate distinct senders. */
+function postMessage(
+  base: string,
+  shareId: string,
+  localAddress: string,
+  text: string,
+): Promise<{ status: number }> {
+  const url = new URL(`/api/shares/${shareId}/message`, base);
+  const body = JSON.stringify({ name: "n", text });
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: "POST",
+        localAddress,
+        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
 
 async function expectEventually(cond: () => boolean, ms = 4000): Promise<void> {
   const start = Date.now();

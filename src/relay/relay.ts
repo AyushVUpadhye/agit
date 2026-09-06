@@ -40,7 +40,13 @@ interface Share {
   lastHash: string | null;
   viewers: Set<ServerResponse>;
   inboxes: Set<ServerResponse>;
-  msgTimes: number[];
+  /**
+   * Send timestamps for the /message endpoint, keyed by remote address —
+   * NOT a single shared bucket. That endpoint has no auth (any viewer with
+   * the link can post), so a per-share bucket let one viewer exhaust the
+   * whole share's chat quota and silence every other viewer for the sharer.
+   */
+  msgTimes: Map<string, number[]>;
 }
 
 const LIMITS = {
@@ -113,7 +119,7 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
         lastHash: null,
         viewers: new Set(),
         inboxes: new Set(),
-        msgTimes: [],
+        msgTimes: new Map(),
       };
       shares.set(share.id, share);
       return json(res, 201, {
@@ -197,13 +203,20 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
 
       if (verb === "message" && req.method === "POST") {
         const now = Date.now();
-        share.msgTimes = share.msgTimes.filter((t) => now - t < 60_000);
-        if (share.msgTimes.length >= LIMITS.msgsPerMinute) return json(res, 429, { error: "slow down" });
+        const sender = req.socket.remoteAddress ?? "unknown";
+        const recent = (share.msgTimes.get(sender) ?? []).filter((t) => now - t < 60_000);
+        if (recent.length >= LIMITS.msgsPerMinute) {
+          share.msgTimes.set(sender, recent);
+          return json(res, 429, { error: "slow down" });
+        }
         const body = await readBody(req, LIMITS.messageBody);
         const textV = (body as { text?: unknown })?.text;
-        if (typeof textV !== "string" || textV.trim() === "")
+        if (typeof textV !== "string" || textV.trim() === "") {
+          share.msgTimes.set(sender, recent);
           return json(res, 400, { error: "body must be {text, name?}" });
-        share.msgTimes.push(now);
+        }
+        recent.push(now);
+        share.msgTimes.set(sender, recent);
         const nameV = (body as { name?: unknown })?.name;
         const msg = {
           name: typeof nameV === "string" ? nameV.slice(0, LIMITS.messageName) : "viewer",
