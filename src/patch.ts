@@ -52,11 +52,18 @@ export function applyUnifiedDiff(base: string | null, diff: string): string {
       } else if (tag === "+") {
         out.push(text);
       } else if (l === "") {
-        // Tolerate a bare empty line as empty context (some emitters trim).
-        if (cursor < baseLines.length && baseLines[cursor] === "") {
-          out.push("");
-          cursor++;
+        // Tolerate a bare empty line as empty context (some emitters trim
+        // trailing whitespace off a ' ' context line down to nothing) — but a
+        // genuine mismatch still throws, exactly like every other context
+        // line, per this module's "strict by design" contract above.
+        if (cursor >= baseLines.length || baseLines[cursor] !== "") {
+          throw new PatchError(
+            `context mismatch at base line ${cursor + 1}: expected ${JSON.stringify("")}, ` +
+              `found ${JSON.stringify(baseLines[cursor] ?? "<eof>")}`,
+          );
         }
+        out.push("");
+        cursor++;
       } else {
         throw new PatchError(`unrecognized diff line: ${JSON.stringify(l)}`);
       }
@@ -71,9 +78,11 @@ export function applyUnifiedDiff(base: string | null, diff: string): string {
 }
 
 function parseHunks(diff: string): Hunk[] {
+  const rawLines = diff.split("\n");
   const hunks: Hunk[] = [];
   let current: Hunk | null = null;
-  for (const raw of diff.split("\n")) {
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i]!;
     const m = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(raw);
     if (m) {
       current = { oldStart: Number(m[1]), lines: [] };
@@ -81,14 +90,15 @@ function parseHunks(diff: string): Hunk[] {
       continue;
     }
     if (current === null) continue; // ---/+++/index headers
-    if (raw === "" && diff.endsWith("\n") && raw === diff.split("\n").at(-1)) continue;
+    // `diff.split("\n")` on a trailing-newline string produces one final ""
+    // element that isn't a real diff line — drop it by position. A genuine
+    // bare-empty context/add/delete line earlier in the diff has the same
+    // value ("") but is not the last element, and must be kept: comparing by
+    // value here (the previous bug) silently dropped every such line.
+    if (raw === "" && i === rawLines.length - 1 && diff.endsWith("\n")) continue;
     current.lines.push(raw);
   }
   if (hunks.length === 0) throw new PatchError("diff contains no hunks");
-  // Drop trailing empty artifacts of the final split.
-  for (const h of hunks) {
-    while (h.lines.length > 0 && h.lines[h.lines.length - 1] === "") h.lines.pop();
-  }
   return hunks;
 }
 
