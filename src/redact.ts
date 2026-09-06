@@ -28,13 +28,32 @@ const PATTERNS: Pattern[] = [
     regexes: [/\bgh[pousr]_[A-Za-z0-9]{36,}\b/g, /\bgithub_pat_[A-Za-z0-9_]{22,}\b/g],
   },
   { label: "slack-token", regexes: [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g] },
+  {
+    label: "slack-webhook",
+    regexes: [/\bhttps:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9]+\/[A-Za-z0-9]+\/[A-Za-z0-9]+\b/g],
+  },
   { label: "google-api-key", regexes: [/\bAIza[0-9A-Za-z_-]{35}\b/g] },
+  { label: "stripe-key", regexes: [/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}\b/g] },
+  { label: "npm-token", regexes: [/\bnpm_[A-Za-z0-9]{36}\b/g] },
   { label: "jwt", regexes: [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g] },
   { label: "bearer", regexes: [/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/gi] },
   {
+    // scheme://user:password@host — connection strings and API URLs commonly
+    // carry the credential in the userinfo component. Keep everything but
+    // the password itself; the "@" that follows is outside the match.
+    label: "url-credentials",
+    regexes: [/\b([a-z][a-z0-9+.-]{1,15}:\/\/[^\s/:@]{1,64}:)([^\s/@]{3,})(?=@)/gi],
+    replacement: "$1[REDACTED:url-credentials]",
+  },
+  {
+    // The keyword MUST end the identifier before "=`/`:` — e.g. `password`,
+    // `db_password`, `DB_PASSWORD`, `client_secret`, `AUTH_TOKEN` all match.
+    // A plain `\bpassword\b` misses every one of those SCREAMING_SNAKE_CASE
+    // or prefixed forms: `_` and `-` are word characters to `\b`, so there is
+    // no boundary between them and the keyword that follows.
     label: "assignment",
     regexes: [
-      /(\b(?:api[_-]?key|apikey|secret|token|passwd|password|authorization)\b\s*[=:]\s*["']?)([A-Za-z0-9_\-./+]{16,})/gi,
+      /((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|apikey|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|token|passwd|password|dsn|connection[_-]?string|authorization)\s*[=:]\s*["']?)([A-Za-z0-9_\-./+]{16,})/gi,
     ],
     replacement: "$1[REDACTED:assignment]",
   },
@@ -49,9 +68,10 @@ export function redactString(s: string, counts: RedactionCounts): string {
       out = out.replace(re, (...args) => {
         counts[p.label] = (counts[p.label] ?? 0) + 1;
         if (p.replacement) {
-          // Reapply the kept group manually.
+          // Reapply the kept groups manually ($1, $2, ... — as many as the
+          // pattern captured).
           const groups = args.slice(1, -2) as string[];
-          return p.replacement.replace("$1", groups[0] ?? "");
+          return p.replacement.replace(/\$(\d)/g, (_m, d: string) => groups[Number(d) - 1] ?? "");
         }
         return `[REDACTED:${p.label}]`;
       });

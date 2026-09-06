@@ -22,6 +22,9 @@ const K = {
   google: joined("AI", "za", "SyA1234567890abcdefghijklmnopqrstuv"),
   jwt: joined("ey", "JhbGciOiJIUzI1NiJ9.", "ey", "JzdWIiOiIxMjM0In0.", "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV"),
   pem: joined("-----BEGIN RSA ", "PRIVATE KEY-----", "\nMIIabc\nxyz\n", "-----END RSA ", "PRIVATE KEY-----"),
+  stripe: joined("sk_", "live_", "4eC39HqLyjWDarjtT1zdp7dc"),
+  npm: joined("npm_", "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIII"),
+  webhook: joined("https://hooks.slack.com/services/T00000000/B00000000/", "XXXXXXXXXXXXXXXXXXXXXXXX"),
 };
 
 function run(s: string): { out: string; counts: RedactionCounts } {
@@ -74,6 +77,41 @@ describe("redaction (SPEC §8)", () => {
   it("assignment keeps the key and separator", () => {
     const { out } = run('password = "hunter2hunter2hunter2"');
     expect(out).toBe('password = "[REDACTED:assignment]"');
+  });
+
+  it("assignment fires on SCREAMING_SNAKE_CASE and prefixed keys, not just the bare keyword", () => {
+    // \b does not separate "_"/letters (both are \w), so a plain
+    // \bpassword\b never matched these — the dominant real-world .env shape.
+    expect(run("DB_PASSWORD=hunter2hunter2hunter2").out).toBe("DB_PASSWORD=[REDACTED:assignment]");
+    expect(run('export AUTH_TOKEN="abcdefghijklmnopqrstuvwx"').out).toBe(
+      'export AUTH_TOKEN="[REDACTED:assignment]"',
+    );
+    expect(run("stripe_client_secret: abcdefghijklmnopqrstuvwx").out).toBe(
+      "stripe_client_secret: [REDACTED:assignment]",
+    );
+  });
+
+  it("url-credentials redacts only the password in a connection string", () => {
+    const { out, counts } = run("postgres://admin:hunter2hunter2@db.internal:5432/app");
+    expect(out).toBe("postgres://admin:[REDACTED:url-credentials]@db.internal:5432/app");
+    expect(counts["url-credentials"]).toBe(1);
+  });
+
+  it("url-credentials leaves a bare URL (no embedded credentials) untouched", () => {
+    const code = "fetch('https://example.com/api?token=short')";
+    expect(run(code).out).toBe(code);
+  });
+
+  it("stripe key", () => {
+    expect(run(K.stripe).out).toBe("[REDACTED:stripe-key]");
+  });
+
+  it("npm token", () => {
+    expect(run(K.npm).out).toBe("[REDACTED:npm-token]");
+  });
+
+  it("slack webhook url", () => {
+    expect(run(K.webhook).out).toBe("[REDACTED:slack-webhook]");
   });
 
   it("does not fire on ordinary code", () => {

@@ -230,20 +230,24 @@ are replaced with `[REDACTED:<label>]`. v1 patterns:
 | `aws-access-key-id` | `AKIA` or `ASIA` + 16 uppercase alphanumerics                       |
 | `github-token`      | `ghp_/gho_/ghu_/ghs_/ghr_` + 36+ alphanumerics; `github_pat_` + 22+ |
 | `slack-token`       | `xoxb/xoxa/xoxp/xoxr/xoxs-` + 10+ of `[A-Za-z0-9-]`                 |
+| `slack-webhook`     | `https://hooks.slack.com/services/<id>/<id>/<id>`                   |
 | `google-api-key`    | `AIza` + 35 of `[0-9A-Za-z_-]`                                      |
+| `stripe-key`        | `sk_/rk_` + `live_/test_` + 10+ alphanumerics                       |
+| `npm-token`         | `npm_` + 36 alphanumerics                                           |
 | `private-key`       | `-----BEGIN ... PRIVATE KEY-----` through the matching `END` block  |
 | `bearer`            | `Bearer ` + 20+ token characters (case-insensitive)                 |
 | `jwt`               | three `.`-joined base64url segments starting `eyJ`                  |
-| `assignment`        | `api_key/apikey/secret/token/password/passwd/authorization`, `=` or `:`, then a quoted-or-bare value of 16+ token characters (case-insensitive; the key and separator are kept) |
+| `url-credentials`   | `scheme://user:` + 3+ password characters immediately before `@` (case-insensitive scheme; connection strings and API URLs) — only the password is redacted, `scheme://user:` and the following `@host` are kept |
+| `assignment`        | an identifier ending in `api_key/apikey/client_secret/secret/access_token/refresh_token/auth_token/session_token/token/password/passwd/dsn/connection_string/authorization` — including prefixed forms like `DB_PASSWORD` or `stripe_secret` (the keyword only needs to end the identifier; `_`/`-` before it don't block a match) — then `=` or `:`, then a quoted-or-bare value of 16+ token characters (case-insensitive; the full key and separator are kept) |
 
 Counts per label go to `meta.json` `redactions`.
 
 **What is NOT redacted:** file contents and source code generally, prompts,
-paths, usernames, hostnames, email addresses, URLs, IP addresses, and any
-secret that doesn't match the table. Redaction is a seatbelt, not a
-guarantee. Sharing a session remains an explicit, per-session decision, and
-tooling MUST treat log contents as untrusted data — displayed, never
-executed.
+paths, usernames, hostnames, email addresses, IP addresses, bare URLs
+without embedded credentials, and any secret that doesn't match the table.
+Redaction is a seatbelt, not a guarantee. Sharing a session remains an
+explicit, per-session decision, and tooling MUST treat log contents as
+untrusted data — displayed, never executed.
 
 ## 9. Known losses (v1, Claude Code adapter)
 
