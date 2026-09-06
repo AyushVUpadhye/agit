@@ -22,7 +22,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(ROOT, "dist", "cli.js");
 const FIXTURE = join("fixtures", "claude-code", "demo.jsonl");
 const CAST = join(ROOT, "docs", "demo.cast");
-const GIF = join(ROOT, "docs", "demo.gif");
+const GIF = join(ROOT, "docs", "demo-cast.gif"); // preview render; docs/demo.gif comes from render-demo-gif.py
 const store = mkdtempSync(join(tmpdir(), "agit-demo-"));
 
 const COLS = 114;

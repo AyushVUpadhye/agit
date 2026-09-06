@@ -2,3 +2,5 @@ node_modules/
 dist/
 .agit/
 *.tsbuildinfo
+docs/demo.svg
+docs/demo-cast.gif

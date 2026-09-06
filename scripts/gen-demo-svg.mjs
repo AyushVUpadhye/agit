@@ -9,13 +9,16 @@
  * cuts, reveal timing, and color (event-type chips, diff +/-, the DIVERGED
  * highlight) — the same coloring the share page applies to the same data.
  *
- * NOT the README embed: GitHub's camo pipeline strips <style> keyframe
- * animation out of SVGs in READMEs, freezing this to its blank base frame —
- * the README embeds docs/demo.gif instead (scripts/record-demo.mjs). This
- * generator stays for contexts that do render SVG animation: local viewing,
- * docs sites, social cards.
+ * NOT the README embed itself: GitHub's camo pipeline strips <style>
+ * keyframe animation out of SVGs in READMEs, freezing this to its blank
+ * base frame. The README instead embeds docs/demo.gif, which is rasterized
+ * FROM THIS SAME SCENE MODEL by scripts/render-demo-gif.py — same chrome,
+ * colors, and timing, delivered in the one format GitHub reliably animates.
+ * The SVG remains for contexts that do render it: local viewing, docs
+ * sites, social cards.
  *
- * Usage: npm run build && node scripts/gen-demo-svg.mjs
+ * Usage: npm run build && node scripts/gen-demo-svg.mjs [--frames out.json]
+ *        (--frames also writes the timeline model the GIF renderer consumes)
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -134,21 +137,23 @@ function scene(start, end) {
           [text, C.fg],
         ],
       }),
-    say: (dt, outLines) => {
+    say: (dt, outLines, step = 0.06) => {
       for (const [i, l] of outLines.entries()) {
-        lines.push({ t: start + dt + i * 0.06, end, row: row++, runs: colorize(l) });
+        lines.push({ t: start + dt + i * step, end, row: row++, runs: colorize(l) });
       }
     },
     gap: () => row++,
   };
 }
 
-// Scene 1 — import (the poster: visible from t=0).
+// Scene 1 — import. The whole block lands at t=0 so the GIF's first frame
+// is a real poster (what GitHub shows viewers with autoplay disabled).
 const s1 = scene(0, 4.6);
 s1.cmd(0, "agit import fixtures/claude-code/demo.jsonl");
 s1.say(
-  0.5,
+  0,
   importOut.filter((l) => !l.startsWith("  wrote")),
+  0,
 );
 
 // Scene 2 — the payoff, early: the divergent diff and the state proof.
@@ -196,3 +201,10 @@ ${body}</svg>
 `;
 writeFileSync(join(ROOT, "docs", "demo.svg"), svg);
 console.log(`wrote docs/demo.svg (${svg.length} bytes, ${lines.length} lines, ${TOTAL}s loop, ${W}x${H})`);
+
+const fi = process.argv.indexOf("--frames");
+if (fi !== -1 && process.argv[fi + 1]) {
+  const spec = { W, H, TOP, LH, FS, TOTAL, title: "agit — the session is data", lines };
+  writeFileSync(process.argv[fi + 1], JSON.stringify(spec));
+  console.log(`wrote frame spec ${process.argv[fi + 1]} for scripts/render-demo-gif.py`);
+}
