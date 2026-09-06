@@ -15,6 +15,14 @@ Notable changes to agit. The event format itself is versioned separately
   date separators on multi-day sessions; file counts everywhere are labeled
   as the lower bounds they are, and `[DIVERGED at seq N]` marks files
   provably modified outside structured edits.
+- **`agit merge <fork-dir>`** (milestone 3, part 2): file-level three-way
+  merge back from a fork — fork point as base, `git merge-file` as the
+  engine, conflicts as standard markers, outcomes and summary recorded in
+  the fork's `merge.json`.
+- **`agit pr <id>`**: a verifiable handoff bundle — event log + meta +
+  hash-verified tree + `SEED.md` + provenance.
+- `agit verify` accepts a path to any events.jsonl (pr bundles, downloaded
+  share logs), not just store ids.
 - `agit export` (JSONL or `--json`).
 
 ## 0.1.0 — 2026-09-06

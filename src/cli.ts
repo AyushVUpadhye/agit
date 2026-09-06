@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /** agit — git for running agents. Local verbs only (roadmap milestone 1). */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { claudeCodeAdapter } from "./adapters/claude-code.js";
 import type { Adapter } from "./adapters/adapter.js";
@@ -10,6 +10,7 @@ import { buildChain, sha256Hex, toJsonl } from "./format/hash.js";
 import { verifyChain } from "./format/verify.js";
 import type { AgitEvent, SessionMeta } from "./format/events.js";
 import { writeFork } from "./fork.js";
+import { mergeFork, readForkInfo } from "./merge.js";
 import { redactDeep, type RedactionCounts } from "./redact.js";
 import { startRelay } from "./relay/relay.js";
 import {
@@ -40,7 +41,9 @@ usage:
   agit import <native-session.jsonl>   ingest a native session into .agit/
   agit ls                              list imported sessions
   agit show <id>                       summarize one session
-  agit verify <id>                     validate the hash chain
+  agit verify <id | events.jsonl>      validate the hash chain — of a stored
+                                       session, or any log file (pr bundles,
+                                       downloaded share logs)
   agit replay <id> [--at N] [--state]  step through events; --at jumps to N,
                                        --state prints file state at that point
   agit replay <id> --timeline          print the whole timeline, one line per event
@@ -48,13 +51,19 @@ usage:
                                        JSON array with --json — for other tools
   agit fork <id> --at N [--out DIR]    branch at event N: reconstruct the file tree
                                        (hash-verified) and write a context seed
+  agit merge <fork-dir> [--into DIR]   three-way merge a fork's files back
+                                       (base = fork point), via git merge-file
+  agit pr <id> [--at N] [--out DIR]    handoff bundle for a colleague: log +
+                                       meta + verified tree + context seed
   agit share <id | native.jsonl>       share a session through a relay — live if it
                                        is still running; viewer messages land here
   agit relay                           run a relay (self-hosted, in-memory)
 
 options:
   --dir <path>     where .agit/ lives (default: current directory)
-  --out <dir>      fork: where to write tree/, SEED.md, fork.json
+  --out <dir>      fork/pr: where to write the fork or bundle
+  --into <dir>     merge: target directory (default: current directory)
+  --summary <txt>  merge: what the fork learned, recorded in merge.json
   --relay <url>    relay to share through (default: $AGIT_RELAY or http://127.0.0.1:7717)
   --ttl <hours>    how long the share link lives (default 24h, max 168h)
   --static         share the log as it is now; do not tail for growth
@@ -70,6 +79,8 @@ interface Opts {
   state: boolean;
   json: boolean;
   out?: string;
+  into?: string;
+  summary?: string;
   relay: string;
   ttlHours?: number;
   static: boolean;
@@ -96,6 +107,8 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     else if (a === "--timeline") opts.timeline = true;
     else if (a === "--state") opts.state = true;
     else if (a === "--out") opts.out = argv[++i];
+    else if (a === "--into") opts.into = argv[++i];
+    else if (a === "--summary") opts.summary = argv[++i];
     else if (a === "--json") opts.json = true;
     else if (a === "--relay") opts.relay = argv[++i] ?? opts.relay;
     else if (a === "--ttl") opts.ttlHours = Number(argv[++i]);
@@ -127,6 +140,10 @@ async function main(): Promise<number> {
       return cmdExport(opts);
     case "fork":
       return cmdFork(opts);
+    case "merge":
+      return cmdMerge(opts);
+    case "pr":
+      return cmdPr(opts);
     case "share":
       return cmdShare(opts);
     case "relay":
@@ -303,9 +320,22 @@ function cmdShow(opts: Opts): number {
 }
 
 function cmdVerify(opts: Opts): number {
-  const id = requireId(opts);
-  const lines = readSessionLines(opts.dir, id);
-  const meta = readSessionMeta(opts.dir, id) ?? undefined;
+  // A path to an events.jsonl (a pr bundle, a downloaded share log) verifies
+  // directly; otherwise the argument is a store session id.
+  let lines: string[];
+  let meta: SessionMeta | undefined;
+  const arg = opts.args[0];
+  if (arg !== undefined && existsSync(resolve(arg)) && statSync(resolve(arg)).isFile()) {
+    lines = readFileSync(resolve(arg), "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "");
+    const sibling = join(dirname(resolve(arg)), "meta.json");
+    meta = existsSync(sibling) ? (JSON.parse(readFileSync(sibling, "utf8")) as SessionMeta) : undefined;
+  } else {
+    const id = requireId(opts);
+    lines = readSessionLines(opts.dir, id);
+    meta = readSessionMeta(opts.dir, id) ?? undefined;
+  }
   const res = verifyChain(lines, meta);
   if (res.ok) {
     console.log(
@@ -397,6 +427,75 @@ function cmdFork(opts: Opts): number {
   );
   console.log(`  parentage   ${join(outDir, "fork.json")}`);
   console.log("  (the tree reflects structured edits only; shell-driven changes were invisible to the log)");
+  return 0;
+}
+
+function cmdMerge(opts: Opts): number {
+  const forkDir = opts.args[0] ? resolve(opts.args[0]) : undefined;
+  if (!forkDir || !existsSync(join(forkDir, "fork.json"))) {
+    console.error(
+      "usage: agit merge <fork-dir> [--into DIR] [--summary TEXT] — fork-dir must contain fork.json",
+    );
+    return 2;
+  }
+  const info = readForkInfo(forkDir);
+  let events: AgitEvent[];
+  try {
+    events = readSessionEvents(opts.dir, resolveSessionId(opts.dir, info.sourceSession));
+  } catch {
+    console.error(
+      `source session ${info.sourceSession} is not in this store — the merge base is reconstructed from its log. Import it first.`,
+    );
+    return 1;
+  }
+  const intoDir = resolve(opts.into ?? ".");
+  const { results, conflicts } = mergeFork({ forkDir, intoDir, sourceEvents: events, summary: opts.summary });
+
+  console.log(`merging fork of ${info.sourceSession} (at event ${info.atSeq}) into ${intoDir}`);
+  for (const r of results) console.log(`  ${r.outcome.padEnd(12)} ${r.rel}`);
+  console.log(
+    conflicts > 0
+      ? `${conflicts} conflict${conflicts === 1 ? "" : "s"} — standard markers are in the files; finish by hand.`
+      : "clean: no conflicts.",
+  );
+  console.log(`recorded in ${join(forkDir, "merge.json")}`);
+  return conflicts > 0 ? 1 : 0;
+}
+
+function cmdPr(opts: Opts): number {
+  const id = requireId(opts);
+  const events = readSessionEvents(opts.dir, id);
+  const at = opts.at ?? events.length - 1;
+  if (!Number.isInteger(at) || at < 0 || at >= events.length) {
+    console.error(`--at ${String(opts.at)} is outside this session (0..${events.length - 1})`);
+    return 2;
+  }
+  const check = verifyChain(readSessionLines(opts.dir, id));
+  if (!check.ok) {
+    console.error("refusing to hand off an unverifiable session (agit verify it first)");
+    return 1;
+  }
+  const outDir = resolve(opts.out ?? `agit-pr-${id.slice(0, 8)}`);
+  if (existsSync(outDir)) {
+    console.error(`refusing to write into existing ${outDir} — pass a fresh --out`);
+    return 1;
+  }
+  const res = writeFork(events, at, id, outDir);
+  // The bundle carries the log itself: the recipient can agit verify it and
+  // replay/show/fork it without ever having met this machine.
+  writeFileSync(join(outDir, "events.jsonl"), readSessionLines(opts.dir, id).join("\n") + "\n", "utf8");
+  const meta = readSessionMeta(opts.dir, id);
+  if (meta) writeFileSync(join(outDir, "meta.json"), JSON.stringify(meta, null, 2) + "\n", "utf8");
+
+  console.log(`handoff bundle for ${id} at event ${at}:`);
+  console.log(`  ${outDir}`);
+  console.log(`    events.jsonl  the full log — verify with: agit verify ${join(outDir, "events.jsonl")}`);
+  console.log(`    tree/         ${res.written.length} reconstructed, hash-verified files`);
+  if (res.skipped.length > 0)
+    console.log(`                  (${res.skipped.length} not reconstructible — listed in SEED.md)`);
+  console.log("    SEED.md       what the session was doing — the recipient's starting prompt");
+  console.log("    fork.json     provenance: source session id + fork-point hash");
+  console.log("share the directory however you like; nothing in it phones home.");
   return 0;
 }
 

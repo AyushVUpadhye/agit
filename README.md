@@ -53,6 +53,16 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
   the task, last exchanges, file state) — not a transplant of the agent's
   mind. `fork.json` records the source session and fork-point hash, so
   provenance is checkable with `agit verify`.
+- **`agit merge <fork-dir>`** — bring a fork's files back: ordinary git
+  three-way merge per file with the fork point as base (`git merge-file`
+  does the merging). Trivial cases fast-forward, real conflicts get
+  standard markers and a nonzero exit, and the merge — outcomes plus your
+  `--summary` of what the fork learned — is recorded in the fork's
+  `merge.json`. Not a merge of two minds; file-level, as promised.
+- **`agit pr <id>`** — hand a session to a colleague as a directory: the
+  full event log (they run `agit verify` on it directly), `meta.json`, the
+  reconstructed hash-verified tree, `SEED.md` context, and provenance.
+  Working context, not a read-only transcript.
 - **`agit share <id | native.jsonl>`** — share a session through a relay,
   **live while the agent is still running**: the CLI tails the native log
   and streams events; teammates watch in a browser (timeline, diffs, token
@@ -100,10 +110,11 @@ Said plainly:
   until the link expires.
 - **No TLS in the relay.** It binds loopback by default; exposing it to a
   network means putting a TLS proxy or tunnel in front (PROTOCOL.md).
-- **No `merge` or `pr` yet.** Roadmap milestone 3, second half. Merge will
-  be file-level three-way merge from the fork point plus a written summary —
-  not a merge of two minds. Fork's context seeding is a summary by design;
-  you cannot inject history into a running agent.
+- **Merge is file-level and needs git.** Three-way content merge only:
+  deletions in a fork are invisible (the fork tree records what the log
+  could reconstruct, so absence means untouched, not deleted), renames are
+  two files, and `git merge-file` must be on PATH. Fork/pr context seeding
+  is a summary by design; you cannot inject history into a running agent.
 - **Redaction is a seatbelt, not a guarantee.** Session logs contain whatever
   the agent saw. Before sharing one anywhere, read it.
 
