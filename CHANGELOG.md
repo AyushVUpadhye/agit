@@ -1,0 +1,46 @@
+# Changelog
+
+Notable changes to agit. The event format itself is versioned separately
+(SPEC.md §11); a spec bump is always called out here in bold.
+
+## 0.1.0 — 2026-09-06
+
+Initial release: the format, one adapter, local inspection, live sharing.
+
+### Added
+
+- **SPEC.md** — the v1 event format: append-only JSONL, eight event types,
+  JCS-style canonical serialization, SHA-256 hash chain, deterministic
+  imports, documented redaction patterns and known losses.
+- **Claude Code adapter** — maps native `~/.claude/projects` logs in file
+  order; preserves the native `uuid`/`parentUuid` DAG under
+  `payload.native`; dedupes per-API-message token usage into `cost` events;
+  derives `file.diff` with before/after content hashes from structured
+  `Edit`/`Write` results; skips and counts everything it cannot map.
+- **CLI** — `import`, `ls`, `show`, `verify` (first broken link, truncation
+  via meta), `replay` (interactive stepping, `--at`, `--timeline`,
+  cumulative file state), `export` (JSONL or `--json` to stdout).
+- **`share` + `relay`** (protocol v0, PROTOCOL.md) — live session sharing:
+  the CLI tails a running session's native log and streams prefix-stable,
+  hash-chained events through a self-hosted in-memory relay; teammates
+  watch a browser replay (timeline, diffs, token meter) and send messages
+  that land in the sharer's terminal. Watch-only: nothing is injected into
+  the running agent. A completed live stream is byte-identical to a full
+  import. Unguessable expiring links, chain-checked writes, strict-CSP
+  share page.
+- **Redaction** — ten credential patterns applied to every payload string at
+  import, before hashing; counts recorded in `meta.json`.
+- **Golden-fixture guarantee** — the committed golden log pins canonical
+  serialization, hashing, redaction, and the adapter mapping byte for byte,
+  in the test suite and again in CI through the real CLI.
+- Tooling: TypeScript/ESM, zero runtime dependencies; vitest suite over
+  synthetic fixtures; ESLint (flat, typescript-eslint strict) + Prettier;
+  CI on Linux and Windows, Node 20/22, with least-privilege workflow
+  permissions.
+
+### Known limitations (documented, not hidden)
+
+- One adapter (Claude Code). `file.diff` covers structured edits only —
+  shell-driven changes are invisible to replay. No `fork`/`merge`/`pr` yet.
+  Share has no writer resume and no built-in TLS. Redaction is a seatbelt,
+  not a guarantee.
