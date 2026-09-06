@@ -66,6 +66,14 @@ def main(spec_path, out_path):
         optimize=True,
     )
     print(f"wrote {out_path} ({len(quantized)} frames, {sum(durations) / 1000:.1f}s loop, {W}x{H})")
+    if out_path.endswith(".gif"):
+        # The README embeds these same bytes as docs/demo.png: browsers decode
+        # images by magic bytes, and the .png name keeps GitHub from wrapping
+        # the demo in its <animated-image> play-button control.
+        png = out_path[: -len(".gif")] + ".png"
+        with open(out_path, "rb") as src, open(png, "wb") as dst:
+            dst.write(src.read())
+        print(f"wrote {png} (same bytes; README embed)")
 
 
 def draw_frame(spec, visible, font, title_font, W, H):

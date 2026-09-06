@@ -12,7 +12,8 @@ native log into an append-only, hash-chained JSONL event log — and every
 feature is a view over that log. agit does not build an agent; it sits above
 every agent, the way git sits above every editor.
 
-![agit replay showing a diverged file](docs/demo.gif?v=3)
+<!-- demo.png is GIF bytes: the .png name keeps GitHub from wrapping the demo in its play-button control -->
+![agit replay showing a diverged file](docs/demo.png)
 
 *(a synthetic fixture session — real ones look the same, only longer)*
 
