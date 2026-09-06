@@ -1,0 +1,41 @@
+{
+  "name": "agitsh",
+  "version": "0.1.0",
+  "description": "git for running agents — import, inspect, verify, and replay AI coding sessions as an open, hash-chained event log",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thegoodengineers/agit.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "agit": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "SPEC.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "agents",
+    "ai",
+    "claude-code",
+    "session",
+    "replay",
+    "audit",
+    "jsonl"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
