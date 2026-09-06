@@ -46,10 +46,12 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
 - **`agit share <id | native.jsonl>`** — share a session through a relay,
   **live while the agent is still running**: the CLI tails the native log
   and streams events; teammates watch in a browser (timeline, diffs, token
-  meter) and can send messages that land in your terminal. A completed live
-  stream is byte-identical to a full import — viewers can download
-  `events.jsonl` and `agit verify` what they watched. Links expire (24h
-  default) and sharing is opt-in per session, always.
+  meter) and can send messages that land in your terminal. **Watching is
+  read-only**: viewer messages reach the human at the keyboard, never the
+  agent (see below). A completed live stream is byte-identical to a full
+  import — viewers can download `events.jsonl` and `agit verify` what they
+  watched. Links expire (24h default) and sharing is opt-in per session,
+  always.
 - **`agit relay`** — the self-hosted relay behind `share`: in-memory only,
   loopback by default, nothing persisted. [PROTOCOL.md](PROTOCOL.md)
   documents the (v0, unstable) wire protocol.
@@ -77,10 +79,17 @@ Said plainly:
 - **`file.diff` coverage is partial.** Diffs come from structured edit tools
   (`Edit`/`Write`). Files changed through shell commands leave no diff event;
   file state from replay is a lower bound on what changed.
-- **Viewer messages are not injection.** They reach the sharing human's
-  terminal, clearly attributed — they are never fed to the running agent.
-  Claude Code has no supported way to inject input into a live interactive
-  session, and agit does not pretend otherwise.
+- **No message injection into a running session.** Sharing is watch-only:
+  viewer messages reach the sharing human's terminal, clearly attributed —
+  they are never fed to the agent. Claude Code has no supported way to
+  inject input into a live interactive session, and agit does not pretend
+  otherwise; if a runtime ever offers a real path, it gets wired
+  per-adapter, opt-in.
+- **No writer resume.** If the sharing CLI dies, that share cannot be
+  resumed — start a new one. The relay keeps what was already streamed
+  until the link expires.
+- **No TLS in the relay.** It binds loopback by default; exposing it to a
+  network means putting a TLS proxy or tunnel in front (PROTOCOL.md).
 - **No `fork`, `merge`, or `pr`.** Roadmap milestone 3. When they land: fork
   will be honestly lossy (file state replays; agent context is summarized,
   not transplanted), merge will be file-level git merge plus a written
