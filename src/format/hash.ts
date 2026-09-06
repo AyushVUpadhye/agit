@@ -12,15 +12,23 @@ export function eventHash(event: Omit<AgitEvent, "hash">): string {
   return sha256Hex(Buffer.from(canonicalJson({ v, seq, ts, session, type, payload, prev }), "utf8"));
 }
 
-/** Chain a sequence of draft events into full events, assigning seq/prev/hash. */
-export function buildChain(session: string, drafts: DraftEvent[]): AgitEvent[] {
+/**
+ * Chain a sequence of draft events into full events, assigning seq/prev/hash.
+ * `from` continues an existing chain (live streaming): seq starts at
+ * from.seq and the first event links to from.prev.
+ */
+export function buildChain(
+  session: string,
+  drafts: DraftEvent[],
+  from: { seq: number; prev: string | null } = { seq: 0, prev: null },
+): AgitEvent[] {
   const events: AgitEvent[] = [];
-  let prev: string | null = null;
-  for (let seq = 0; seq < drafts.length; seq++) {
-    const d = drafts[seq]!;
+  let prev = from.prev;
+  for (let i = 0; i < drafts.length; i++) {
+    const d = drafts[i]!;
     const partial: Omit<AgitEvent, "hash"> = {
       v: SCHEMA_VERSION,
-      seq,
+      seq: from.seq + i,
       ts: d.ts,
       session,
       type: d.type,

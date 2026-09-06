@@ -29,9 +29,20 @@ npm install -g agitsh
   event, and show cumulative file state at any point (`s`). `--at N` jumps
   straight to event N; `--timeline` prints the whole session one line per
   event.
+- **`agit share <id | native.jsonl>`** — share a session through a relay,
+  **live while the agent is still running**: the CLI tails the native log
+  and streams events; teammates watch in a browser (timeline, diffs, token
+  meter) and can send messages that land in your terminal. A completed live
+  stream is byte-identical to a full import — viewers can download
+  `events.jsonl` and `agit verify` what they watched. Links expire (24h
+  default) and sharing is opt-in per session, always.
+- **`agit relay`** — the self-hosted relay behind `share`: in-memory only,
+  loopback by default, nothing persisted. [PROTOCOL.md](PROTOCOL.md)
+  documents the (v0, unstable) wire protocol.
 
-Session ids accept unique prefixes, git-style. Everything is local: no
-server, no network calls, no telemetry.
+Session ids accept unique prefixes, git-style. The inspection verbs are
+fully local: no server, no network calls, no telemetry. Only `share` talks
+to a relay — one you run.
 
 ## The format
 
@@ -52,20 +63,28 @@ Said plainly:
 - **`file.diff` coverage is partial.** Diffs come from structured edit tools
   (`Edit`/`Write`). Files changed through shell commands leave no diff event;
   file state from replay is a lower bound on what changed.
-- **No `share`, `fork`, `merge`, or `pr`.** Those are roadmap milestones 2–3.
-  When they land: fork will be honestly lossy (file state replays; agent
-  context is summarized, not transplanted), merge will be file-level git
-  merge plus a written summary — not a merge of two minds.
+- **Viewer messages are not injection.** They reach the sharing human's
+  terminal, clearly attributed — they are never fed to the running agent.
+  Claude Code has no supported way to inject input into a live interactive
+  session, and agit does not pretend otherwise.
+- **No `fork`, `merge`, or `pr`.** Roadmap milestone 3. When they land: fork
+  will be honestly lossy (file state replays; agent context is summarized,
+  not transplanted), merge will be file-level git merge plus a written
+  summary — not a merge of two minds.
 - **Redaction is a seatbelt, not a guarantee.** Session logs contain whatever
   the agent saw. Before sharing one anywhere, read it.
 
 ## Security posture
 
 Session logs are untrusted input: they may contain adversarial content and
-are never executed, only displayed. Known credential patterns are redacted at
-import, before hashing, and counted in `meta.json`. Sharing (when it exists)
-will be explicitly opt-in per session. Never commit real session logs to this
-repo — tests run against synthetic fixtures.
+are never executed, only displayed — the share page builds its DOM from
+`textContent` exclusively and ships a CSP that forbids external resources.
+Known credential patterns are redacted before events leave your machine
+(at import and during live shares alike) and counted in `meta.json`. Share
+links are unguessable 128-bit capabilities with TTLs; the relay holds
+everything in memory, binds loopback by default, and persists nothing. Never
+commit real session logs to this repo — tests run against synthetic
+fixtures.
 
 ## Development
 
@@ -78,7 +97,9 @@ npm test        # vitest
 ```
 
 Conventional Commits, small and focused. If a real session breaks an adapter,
-fix the adapter, not the fixture.
+fix the adapter, not the fixture. [CONTRIBUTING.md](CONTRIBUTING.md) has the
+full onboarding path — repo map, adapter-writing guide, and the rules that
+are not suggestions. CI runs build + tests on Linux and Windows, Node 20/22.
 
 ## License
 

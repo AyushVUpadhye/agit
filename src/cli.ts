@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** agit — git for running agents. Local verbs only (roadmap milestone 1). */
 
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { claudeCodeAdapter } from "./adapters/claude-code.js";
@@ -10,6 +10,10 @@ import { buildChain, sha256Hex, toJsonl } from "./format/hash.js";
 import { verifyChain } from "./format/verify.js";
 import type { AgitEvent, SessionMeta } from "./format/events.js";
 import { redactDeep, type RedactionCounts } from "./redact.js";
+import { startRelay } from "./relay/relay.js";
+import {
+  createShare, endShare, openInbox, pushEvents, SessionFollower, StabilityError, type ShareInfo,
+} from "./share.js";
 import {
   listSessionIds, readSessionEvents, readSessionLines, readSessionMeta,
   resolveSessionId, sessionDir, writeSession,
@@ -27,27 +31,51 @@ usage:
   agit verify <id>                     validate the hash chain
   agit replay <id> [--at N]            step through events; --at jumps to N
   agit replay <id> --timeline          print the whole timeline, one line per event
+  agit share <id | native.jsonl>       share a session through a relay — live if it
+                                       is still running; viewer messages land here
+  agit relay                           run a relay (self-hosted, in-memory)
 
 options:
-  --dir <path>    where .agit/ lives (default: current directory)
+  --dir <path>     where .agit/ lives (default: current directory)
+  --relay <url>    relay to share through (default: $AGIT_RELAY or http://127.0.0.1:7717)
+  --ttl <hours>    how long the share link lives (default 24h, max 168h)
+  --static         share the log as it is now; do not tail for growth
+  --port <n>       relay: port to listen on (default 7717)
+  --host <addr>    relay: address to bind (default 127.0.0.1; 0.0.0.0 exposes it)
 
-<id> accepts any unique prefix. See SPEC.md for the event format.`;
+<id> accepts any unique prefix. See SPEC.md for the format, PROTOCOL.md for the relay.`;
 
 interface Opts {
   dir: string;
   at?: number;
   timeline: boolean;
+  relay: string;
+  ttlHours?: number;
+  static: boolean;
+  port?: number;
+  host?: string;
   args: string[];
 }
 
 function parseArgs(argv: string[]): { verb: string; opts: Opts } {
-  const opts: Opts = { dir: process.cwd(), timeline: false, args: [] };
+  const opts: Opts = {
+    dir: process.cwd(),
+    timeline: false,
+    relay: process.env.AGIT_RELAY ?? "http://127.0.0.1:7717",
+    static: false,
+    args: [],
+  };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--dir") opts.dir = resolve(argv[++i] ?? ".");
     else if (a === "--at") opts.at = Number(argv[++i]);
     else if (a === "--timeline") opts.timeline = true;
+    else if (a === "--relay") opts.relay = argv[++i] ?? opts.relay;
+    else if (a === "--ttl") opts.ttlHours = Number(argv[++i]);
+    else if (a === "--static") opts.static = true;
+    else if (a === "--port") opts.port = Number(argv[++i]);
+    else if (a === "--host") opts.host = argv[++i];
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else rest.push(a);
   }
@@ -64,6 +92,8 @@ async function main(): Promise<number> {
     case "show": return cmdShow(opts);
     case "verify": return cmdVerify(opts);
     case "replay": return cmdReplay(opts);
+    case "share": return cmdShare(opts);
+    case "relay": return cmdRelay(opts);
     case "help": console.log(USAGE); return 0;
     default:
       console.error(`unknown command: ${verb}\n`);
@@ -237,6 +267,161 @@ async function cmdReplay(opts: Opts): Promise<number> {
   }
   rl.close();
   return 0;
+}
+
+async function cmdRelay(opts: Opts): Promise<number> {
+  const handle = await startRelay({ port: opts.port, host: opts.host });
+  const host = opts.host ?? "127.0.0.1";
+  console.log(`agit relay listening on http://${host}:${handle.port}`);
+  console.log("shares are held in memory only; nothing is written to disk. Ctrl+C to stop.");
+  if (host !== "127.0.0.1" && host !== "localhost") {
+    console.log("NOTE: bound beyond loopback — anyone who can reach this port can view shares they have links for. Prefer a TLS reverse proxy or tunnel.");
+  }
+  await waitForSigint();
+  await handle.close();
+  return 0;
+}
+
+async function cmdShare(opts: Opts): Promise<number> {
+  const target = opts.args[0];
+  if (!target) { console.error("usage: agit share <session-id | native-session.jsonl>"); return 2; }
+  const ttlMs = opts.ttlHours !== undefined && Number.isFinite(opts.ttlHours) ? opts.ttlHours * 3600_000 : undefined;
+
+  // Resolve what we're sharing: a native log path (live-capable), or an
+  // imported session — which is still live-capable when its source file exists.
+  let nativePath: string | null = null;
+  let staticEvents: AgitEvent[] | null = null;
+  if (existsSync(resolve(target)) && !listSessionIds(opts.dir).includes(target)) {
+    nativePath = resolve(target);
+  } else {
+    const id = resolveSessionId(opts.dir, target);
+    const meta = readSessionMeta(opts.dir, id);
+    if (!opts.static && meta && existsSync(meta.source.path)) {
+      nativePath = meta.source.path;
+    } else {
+      staticEvents = readSessionEvents(opts.dir, id);
+    }
+  }
+  if (opts.static && nativePath !== null && staticEvents === null) {
+    // --static on a path: one full (non-live) conversion, pushed once.
+    const lines = readFileSync(nativePath, "utf8").split("\n").filter((l) => l.trim() !== "");
+    const adapter = ADAPTERS.find((a) => a.detect(lines));
+    if (!adapter) { console.error("no adapter recognizes this file"); return 1; }
+    const converted = adapter.convert(lines);
+    const counts: RedactionCounts = {};
+    for (const d of converted.drafts) d.payload = redactDeep(d.payload, counts);
+    staticEvents = buildChain(converted.sessionId, converted.drafts);
+    nativePath = null;
+  }
+
+  const share = await createShare(opts.relay, ttlMs);
+  const expiry = new Date(Date.now() + share.ttlMs).toLocaleString();
+  console.log(`\n  ${share.viewUrl}\n`);
+  console.log(`  sharing the redacted event log — anyone with the link can read it until ${expiry}.`);
+  console.log("  viewer messages appear below; they are NOT injected into the running agent.");
+  console.log("  Ctrl+C ends the share.\n");
+
+  let lastViewers = -1;
+  const inbox = openInbox(opts.relay, share, {
+    onMessage: (m) => console.log(`◀ ${m.ts.slice(11, 19)} [${m.name}] ${m.text}`),
+    onInfo: (i) => {
+      if (i.viewers !== lastViewers) {
+        lastViewers = i.viewers;
+        console.log(`· ${i.viewers} watching`);
+      }
+    },
+  });
+
+  try {
+    if (staticEvents) {
+      await pushAll(opts.relay, share, staticEvents);
+      console.log(`pushed ${staticEvents.length} events (static). Holding the share open…`);
+      await waitForSigint();
+    } else {
+      const adapter = pickAdapterFor(nativePath!);
+      if (!adapter) { console.error("no adapter recognizes this file"); return 1; }
+      const follower = new SessionFollower(nativePath!, adapter);
+      let pushed = 0;
+      const pushNew = async (events: AgitEvent[]) => {
+        await pushAll(opts.relay, share, events);
+        pushed += events.length;
+      };
+      await pushNew(follower.poll());
+      console.log(`live: ${pushed} events so far, tailing ${nativePath}`);
+
+      let ticking = false;
+      let fatal: Error | null = null;
+      const timer = setInterval(() => {
+        if (ticking || fatal) return;
+        ticking = true;
+        void (async () => {
+          try {
+            await pushNew(follower.poll());
+          } catch (err) {
+            if (err instanceof StabilityError) { fatal = err; }
+            // Other errors (relay hiccup, file mid-write) retry next tick.
+          } finally {
+            ticking = false;
+          }
+        })();
+      }, 1000);
+
+      await waitForSigint(() => fatal !== null);
+      clearInterval(timer);
+      if (fatal !== null) { console.error((fatal as Error).message); return 1; }
+      try {
+        const tail = follower.finish();
+        await pushNew(tail);
+        if (tail.length > 0) console.log(`sealed the stream with its final ${tail.length} events — it now matches a full import exactly.`);
+      } catch {
+        /* best effort on shutdown */
+      }
+      console.log(`shared ${pushed} events total.`);
+    }
+  } finally {
+    inbox.abort();
+    await endShare(opts.relay, share);
+    console.log("share ended.");
+  }
+  return 0;
+}
+
+function pickAdapterFor(path: string): Adapter | undefined {
+  const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim() !== "");
+  return ADAPTERS.find((a) => a.detect(lines));
+}
+
+/** Push in size-bounded batches so a 30MB session doesn't become one request. */
+async function pushAll(relayUrl: string, share: ShareInfo, events: AgitEvent[]): Promise<void> {
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const MAX_COUNT = 500;
+  let batch: AgitEvent[] = [];
+  let bytes = 0;
+  for (const e of events) {
+    const size = JSON.stringify(e).length;
+    if (batch.length > 0 && (bytes + size > MAX_BYTES || batch.length >= MAX_COUNT)) {
+      await pushEvents(relayUrl, share, batch);
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(e);
+    bytes += size;
+  }
+  if (batch.length > 0) await pushEvents(relayUrl, share, batch);
+}
+
+function waitForSigint(alsoWhen?: () => boolean): Promise<void> {
+  return new Promise((resolveWait) => {
+    // The ref'd interval both polls the extra condition and guarantees the
+    // event loop stays alive while we wait (a SIGINT listener alone doesn't).
+    const check = setInterval(() => { if (alsoWhen?.()) done(); }, 250);
+    const done = () => {
+      clearInterval(check);
+      process.removeListener("SIGINT", done);
+      resolveWait();
+    };
+    process.once("SIGINT", done);
+  });
 }
 
 function printEventDetail(events: AgitEvent[], seq: number): void {

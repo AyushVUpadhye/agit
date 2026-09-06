@@ -85,7 +85,7 @@ export function eventLine(e: AgitEvent): string {
   const p = e.payload as { [k: string]: Json };
   switch (e.type) {
     case "session.start":
-      return `session.start  runtime=${str(p.runtime)} ${str(p.runtimeVersion)} model=${str(p.model) || "?"}`;
+      return `session.start  runtime=${str(p.runtime)} ${str(p.runtimeVersion)}`.trimEnd();
     case "session.end":
       return `session.end    reason=${str(p.reason)}`;
     case "message.user":

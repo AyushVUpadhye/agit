@@ -10,10 +10,21 @@ export interface ConvertResult {
   skipped: Record<string, number>;
 }
 
+export interface ConvertOptions {
+  /**
+   * The session is still running. Suppress everything that depends on where
+   * the file currently ends (the EOF cost flush and the synthesized
+   * session.end), so that converting a longer version of the same log always
+   * extends this result — the live stream is prefix-stable, and its hashes
+   * equal the final import's prefix.
+   */
+  live?: boolean;
+}
+
 export interface Adapter {
   name: string;
   version: string;
   /** Cheap sniff: could these lines be this runtime's native log? */
   detect(lines: string[]): boolean;
-  convert(lines: string[]): ConvertResult;
+  convert(lines: string[], opts?: ConvertOptions): ConvertResult;
 }

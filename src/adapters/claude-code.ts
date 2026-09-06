@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 import type { DraftEvent, Json } from "../format/events.js";
-import type { Adapter, ConvertResult } from "./adapter.js";
+import type { Adapter, ConvertOptions, ConvertResult } from "./adapter.js";
 
 export const ADAPTER_NAME = "claude-code";
 export const ADAPTER_VERSION = "0.1.0";
@@ -84,7 +84,7 @@ export const claudeCodeAdapter: Adapter = {
     return false;
   },
 
-  convert(lines: string[]): ConvertResult {
+  convert(lines: string[], opts?: ConvertOptions): ConvertResult {
     const skipped: Record<string, number> = {};
     const skip = (key: string) => { skipped[key] = (skipped[key] ?? 0) + 1; };
 
@@ -97,7 +97,7 @@ export const claudeCodeAdapter: Adapter = {
     let runtimeVersion: string | null = null;
     let cwd: string | null = null;
     let gitBranch: string | null = null;
-    let firstModel: string | null = null;
+
     let firstTs: string | null = null;
     let lastTs: string | null = null;
     let records = 0;
@@ -163,7 +163,7 @@ export const claudeCodeAdapter: Adapter = {
         // a record with a different id closes the previous message's cost.
         if (pendingCost && pendingCost.messageId !== messageId) flushCost();
 
-        if (firstModel === null && typeof m.model === "string") firstModel = m.model;
+
 
         const blocks: Json[] = [];
         const toolCalls: DraftEvent[] = [];
@@ -248,7 +248,11 @@ export const claudeCodeAdapter: Adapter = {
         body.push({ ts, type: "message.user", payload: { text: textParts.join("\n\n"), native } });
       }
     }
-    flushCost();
+    // Live mode: everything past this point depends on where the file
+    // currently ends — the pending cost may still gain records and the
+    // session has not actually ended. Emitting neither keeps the result
+    // prefix-stable as the log grows (ConvertOptions.live).
+    if (!opts?.live) flushCost();
 
     if (firstTs === null || lastTs === null || sessionId === null) {
       throw new Error("no conversation records found — is this a Claude Code session log?");
@@ -264,13 +268,16 @@ export const claudeCodeAdapter: Adapter = {
           nativeSessionId: sessionId,
           cwd,
           gitBranch,
-          model: firstModel,
+          // No model here: it belongs to message.assistant/cost events, and a
+          // live share may begin before the first assistant record exists.
           adapter: { name: ADAPTER_NAME, version: ADAPTER_VERSION },
         },
       },
       ...body,
-      { ts: lastTs, type: "session.end", payload: { reason: "log-end", synthesized: true } },
     ];
+    if (!opts?.live) {
+      drafts.push({ ts: lastTs, type: "session.end", payload: { reason: "log-end", synthesized: true } });
+    }
 
     return { sessionId, drafts, records, skipped };
   },

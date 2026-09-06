@@ -66,7 +66,6 @@ describe("claude-code adapter", () => {
       nativeSessionId: "fixture-simple-0001",
       cwd: "C:\\proj",
       gitBranch: "main",
-      model: "claude-opus-5",
     });
     expect(res.drafts[0]!.ts).toBe("2026-09-06T10:00:01.000Z");
     const end = res.drafts[res.drafts.length - 1]!;
