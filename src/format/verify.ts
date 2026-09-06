@@ -13,7 +13,10 @@ export interface VerifyResult {
  * version, type validity, seq contiguity, prev linkage, hash recomputation.
  * When meta is given, also detect truncation via eventCount/headHash.
  */
-export function verifyChain(lines: string[], meta?: Pick<SessionMeta, "eventCount" | "headHash">): VerifyResult {
+export function verifyChain(
+  lines: string[],
+  meta?: Pick<SessionMeta, "eventCount" | "headHash">,
+): VerifyResult {
   let prev: string | null = null;
   let count = 0;
   let lastHash: string | null = null;
@@ -31,7 +34,8 @@ export function verifyChain(lines: string[], meta?: Pick<SessionMeta, "eventCoun
       return broken(count, i, "line is not valid JSON");
     }
     if (e.v !== SCHEMA_VERSION) return broken(count, i, `unknown schema version ${e.v}`);
-    if (typeof e.type !== "string" || !isEventType(e.type)) return broken(count, i, `unknown event type ${JSON.stringify(e.type)}`);
+    if (typeof e.type !== "string" || !isEventType(e.type))
+      return broken(count, i, `unknown event type ${JSON.stringify(e.type)}`);
     if (e.seq !== count) return broken(count, i, `seq ${e.seq}, expected ${count}`);
     if (e.prev !== prev) return broken(count, i, "prev does not match previous event's hash");
     const recomputed = eventHash(e);
@@ -43,10 +47,21 @@ export function verifyChain(lines: string[], meta?: Pick<SessionMeta, "eventCoun
 
   if (meta) {
     if (count !== meta.eventCount) {
-      return { ok: false, events: count, firstBroken: { seq: count, reason: `log has ${count} events but meta.json records ${meta.eventCount} (truncated or extended)` } };
+      return {
+        ok: false,
+        events: count,
+        firstBroken: {
+          seq: count,
+          reason: `log has ${count} events but meta.json records ${meta.eventCount} (truncated or extended)`,
+        },
+      };
     }
     if (lastHash !== meta.headHash) {
-      return { ok: false, events: count, firstBroken: { seq: count - 1, reason: "head hash does not match meta.json" } };
+      return {
+        ok: false,
+        events: count,
+        firstBroken: { seq: count - 1, reason: "head hash does not match meta.json" },
+      };
     }
   }
   return { ok: true, events: count };

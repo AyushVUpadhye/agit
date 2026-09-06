@@ -8,8 +8,16 @@ import type { AgitEvent } from "../src/format/events.js";
 import { startRelay, type RelayHandle } from "../src/relay/relay.js";
 import { createShare, endShare, openInbox, pushEvents, readSse, type ShareInfo } from "../src/share.js";
 
-const FIXTURE = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures", "claude-code", "simple.jsonl");
-const lines = readFileSync(FIXTURE, "utf8").split("\n").filter((l) => l.trim() !== "");
+const FIXTURE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "fixtures",
+  "claude-code",
+  "simple.jsonl",
+);
+const lines = readFileSync(FIXTURE, "utf8")
+  .split("\n")
+  .filter((l) => l.trim() !== "");
 const converted = claudeCodeAdapter.convert(lines);
 const EVENTS: AgitEvent[] = buildChain(converted.sessionId, converted.drafts);
 
@@ -36,10 +44,14 @@ async function collectFrames(
   expect(res.ok).toBe(true);
   const timer = setTimeout(() => ctl.abort(), ms);
   try {
-    await readSse(res.body!, (event, data) => {
-      frames.push({ event, data });
-      if (until(frames)) ctl.abort();
-    }, ctl.signal);
+    await readSse(
+      res.body!,
+      (event, data) => {
+        frames.push({ event, data });
+        if (until(frames)) ctl.abort();
+      },
+      ctl.signal,
+    );
   } catch {
     /* aborting the fetch rejects the read — that is the exit path */
   } finally {
@@ -57,7 +69,10 @@ describe("relay protocol v0", () => {
     await pushEvents(base, share, EVENTS.slice(5));
 
     const jsonl = await (await fetch(`${base}/api/shares/${share.shareId}/events.jsonl`)).text();
-    const got = jsonl.trimEnd().split("\n").map((l) => JSON.parse(l) as AgitEvent);
+    const got = jsonl
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l) as AgitEvent);
     expect(got).toHaveLength(EVENTS.length);
     expect(got[got.length - 1]!.hash).toBe(EVENTS[EVENTS.length - 1]!.hash);
     await endShare(base, share);

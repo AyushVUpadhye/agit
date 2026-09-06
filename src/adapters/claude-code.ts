@@ -86,7 +86,9 @@ export const claudeCodeAdapter: Adapter = {
 
   convert(lines: string[], opts?: ConvertOptions): ConvertResult {
     const skipped: Record<string, number> = {};
-    const skip = (key: string) => { skipped[key] = (skipped[key] ?? 0) + 1; };
+    const skip = (key: string) => {
+      skipped[key] = (skipped[key] ?? 0) + 1;
+    };
 
     const body: DraftEvent[] = [];
     /** toolUseId -> tool name, for labeling file.diff sources. */
@@ -136,9 +138,12 @@ export const claudeCodeAdapter: Adapter = {
       if (sessionId === null && typeof rec.sessionId === "string") sessionId = rec.sessionId;
 
       const type = rec.type;
-      const isConversation = (type === "user" || type === "assistant") &&
-        typeof rec.uuid === "string" && typeof rec.timestamp === "string" &&
-        rec.message !== undefined && rec.message !== null;
+      const isConversation =
+        (type === "user" || type === "assistant") &&
+        typeof rec.uuid === "string" &&
+        typeof rec.timestamp === "string" &&
+        rec.message !== undefined &&
+        rec.message !== null;
 
       if (!isConversation) {
         skip(typeof type === "string" ? type : "<untyped>");
@@ -162,8 +167,6 @@ export const claudeCodeAdapter: Adapter = {
         // Records of one API message arrive consecutively and share usage;
         // a record with a different id closes the previous message's cost.
         if (pendingCost && pendingCost.messageId !== messageId) flushCost();
-
-
 
         const blocks: Json[] = [];
         const toolCalls: DraftEvent[] = [];
@@ -320,7 +323,11 @@ interface PatchHunk {
  *  - Write: { type: "create"|"update", filePath, content, originalFile, structuredPatch }
  * Anything else produces no diff. Never guess.
  */
-function deriveFileDiff(tur: Json | undefined, toolUseId: string, toolName: string | undefined): FileDiffPayload | null {
+function deriveFileDiff(
+  tur: Json | undefined,
+  toolUseId: string,
+  toolName: string | undefined,
+): FileDiffPayload | null {
   if (tur === null || tur === undefined || typeof tur !== "object" || Array.isArray(tur)) return null;
   const t = tur as Record<string, Json>;
   const filePath = t.filePath;
@@ -330,13 +337,21 @@ function deriveFileDiff(tur: Json | undefined, toolUseId: string, toolName: stri
   let after: string;
   let source: string;
 
-  if (typeof t.oldString === "string" && typeof t.newString === "string" && typeof t.originalFile === "string") {
+  if (
+    typeof t.oldString === "string" &&
+    typeof t.newString === "string" &&
+    typeof t.originalFile === "string"
+  ) {
     before = t.originalFile;
-    after = t.replaceAll === true
-      ? before.split(t.oldString).join(t.newString)
-      : replaceFirst(before, t.oldString, t.newString);
+    after =
+      t.replaceAll === true
+        ? before.split(t.oldString).join(t.newString)
+        : replaceFirst(before, t.oldString, t.newString);
     source = toolName ?? "Edit";
-  } else if (typeof t.content === "string" && (t.type === "create" || t.type === "update" || "originalFile" in t)) {
+  } else if (
+    typeof t.content === "string" &&
+    (t.type === "create" || t.type === "update" || "originalFile" in t)
+  ) {
     before = typeof t.originalFile === "string" ? t.originalFile : null;
     after = t.content;
     source = toolName ?? "Write";
@@ -368,13 +383,11 @@ function sha256Utf8(s: string): string {
 }
 
 function renderUnifiedDiff(path: string, before: string | null, after: string, hunks: PatchHunk[]): string {
-  const header = before === null
-    ? `--- /dev/null\n+++ b/${path}`
-    : `--- a/${path}\n+++ b/${path}`;
+  const header = before === null ? `--- /dev/null\n+++ b/${path}` : `--- a/${path}\n+++ b/${path}`;
 
   if (hunks.length > 0 && hunks.every(isValidHunk)) {
-    const parts = hunks.map((h) =>
-      `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n${h.lines.join("\n")}`,
+    const parts = hunks.map(
+      (h) => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n${h.lines.join("\n")}`,
     );
     return `${header}\n${parts.join("\n")}\n`;
   }
@@ -383,19 +396,22 @@ function renderUnifiedDiff(path: string, before: string | null, after: string, h
   // Synthesize a correct, if unminimized, full-file diff.
   const beforeLines = before === null ? [] : splitLines(before);
   const afterLines = splitLines(after);
-  const lines = [
-    ...beforeLines.map((l) => `-${l}`),
-    ...afterLines.map((l) => `+${l}`),
-  ];
+  const lines = [...beforeLines.map((l) => `-${l}`), ...afterLines.map((l) => `+${l}`)];
   return `${header}\n@@ -${beforeLines.length === 0 ? 0 : 1},${beforeLines.length} +${afterLines.length === 0 ? 0 : 1},${afterLines.length} @@\n${lines.join("\n")}\n`;
 }
 
 function isValidHunk(h: unknown): h is PatchHunk {
   const x = h as PatchHunk;
-  return x !== null && typeof x === "object" &&
-    typeof x.oldStart === "number" && typeof x.oldLines === "number" &&
-    typeof x.newStart === "number" && typeof x.newLines === "number" &&
-    Array.isArray(x.lines) && x.lines.every((l) => typeof l === "string");
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    typeof x.oldStart === "number" &&
+    typeof x.oldLines === "number" &&
+    typeof x.newStart === "number" &&
+    typeof x.newLines === "number" &&
+    Array.isArray(x.lines) &&
+    x.lines.every((l) => typeof l === "string")
+  );
 }
 
 function splitLines(s: string): string[] {

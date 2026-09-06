@@ -58,7 +58,14 @@ export interface UsageTotals {
 }
 
 export function usageTotals(events: AgitEvent[], at?: number): UsageTotals {
-  const t: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, apiMessages: 0, models: new Set() };
+  const t: UsageTotals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    apiMessages: 0,
+    models: new Set(),
+  };
   for (const e of events) {
     if (at !== undefined && e.seq > at) break;
     if (e.type !== "cost") continue;
@@ -92,7 +99,10 @@ export function eventLine(e: AgitEvent): string {
       return `user           ${excerpt(str(p.text), 90)}`;
     case "message.assistant": {
       const blocks = Array.isArray(p.blocks) ? (p.blocks as { type?: Json; text?: Json }[]) : [];
-      const text = blocks.filter((b) => b.type === "text").map((b) => str(b.text)).join(" ");
+      const text = blocks
+        .filter((b) => b.type === "text")
+        .map((b) => str(b.text))
+        .join(" ");
       const kinds = blocks.map((b) => str(b.type)).join("+") || "empty";
       return `assistant      [${kinds}] ${excerpt(text, 76)}`;
     }

@@ -6,8 +6,16 @@ import { claudeCodeAdapter } from "../src/adapters/claude-code.js";
 import { buildChain } from "../src/format/hash.js";
 import { fileStateAt, usageTotals } from "../src/state.js";
 
-const FIXTURE = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures", "claude-code", "simple.jsonl");
-const lines = readFileSync(FIXTURE, "utf8").split("\n").filter((l) => l.trim() !== "");
+const FIXTURE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "fixtures",
+  "claude-code",
+  "simple.jsonl",
+);
+const lines = readFileSync(FIXTURE, "utf8")
+  .split("\n")
+  .filter((l) => l.trim() !== "");
 const res = claudeCodeAdapter.convert(lines);
 const events = buildChain(res.sessionId, res.drafts);
 

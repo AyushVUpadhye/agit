@@ -16,7 +16,10 @@ interface Pattern {
 // Order matters: anthropic-key must run before the generic openai-key shape,
 // and specific token shapes before the generic assignment catch-all.
 const PATTERNS: Pattern[] = [
-  { label: "private-key", regexes: [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g] },
+  {
+    label: "private-key",
+    regexes: [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g],
+  },
   { label: "anthropic-key", regexes: [/\bsk-ant-[A-Za-z0-9_-]{16,}/g] },
   { label: "openai-key", regexes: [/\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g] },
   { label: "aws-access-key-id", regexes: [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g] },
@@ -30,7 +33,9 @@ const PATTERNS: Pattern[] = [
   { label: "bearer", regexes: [/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/gi] },
   {
     label: "assignment",
-    regexes: [/(\b(?:api[_-]?key|apikey|secret|token|passwd|password|authorization)\b\s*[=:]\s*["']?)([A-Za-z0-9_\-./+]{16,})/gi],
+    regexes: [
+      /(\b(?:api[_-]?key|apikey|secret|token|passwd|password|authorization)\b\s*[=:]\s*["']?)([A-Za-z0-9_\-./+]{16,})/gi,
+    ],
     replacement: "$1[REDACTED:assignment]",
   },
 ];
@@ -46,7 +51,7 @@ export function redactString(s: string, counts: RedactionCounts): string {
         if (p.replacement) {
           // Reapply the kept group manually.
           const groups = args.slice(1, -2) as string[];
-          return p.replacement.replace("$1", groups[0] ?? "") ;
+          return p.replacement.replace("$1", groups[0] ?? "");
         }
         return `[REDACTED:${p.label}]`;
       });

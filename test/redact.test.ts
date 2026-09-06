@@ -43,7 +43,9 @@ describe("redaction (SPEC §8)", () => {
   });
 
   it("jwt", () => {
-    expect(run("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV").out).toBe("[REDACTED:jwt]");
+    expect(run("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV").out).toBe(
+      "[REDACTED:jwt]",
+    );
   });
 
   it("bearer", () => {
@@ -62,10 +64,7 @@ describe("redaction (SPEC §8)", () => {
 
   it("redactDeep walks nested payloads and counts", () => {
     const counts: RedactionCounts = {};
-    const out = redactDeep(
-      { a: ["xoxb-1234567890-abcdef", { b: "AKIAIOSFODNN7EXAMPLE" }], n: 3 },
-      counts,
-    );
+    const out = redactDeep({ a: ["xoxb-1234567890-abcdef", { b: "AKIAIOSFODNN7EXAMPLE" }], n: 3 }, counts);
     expect(out).toEqual({ a: ["[REDACTED:slack-token]", { b: "[REDACTED:aws-access-key-id]" }], n: 3 });
     expect(counts).toEqual({ "slack-token": 1, "aws-access-key-id": 1 });
   });

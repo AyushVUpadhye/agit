@@ -44,18 +44,20 @@ export function buildChain(
 
 /** Serialize events to JSONL. Key order in the file is the envelope order from SPEC §2. */
 export function toJsonl(events: AgitEvent[]): string {
-  return events
-    .map((e) =>
-      JSON.stringify({
-        v: e.v,
-        seq: e.seq,
-        ts: e.ts,
-        session: e.session,
-        type: e.type,
-        payload: e.payload,
-        prev: e.prev,
-        hash: e.hash,
-      }),
-    )
-    .join("\n") + (events.length > 0 ? "\n" : "");
+  return (
+    events
+      .map((e) =>
+        JSON.stringify({
+          v: e.v,
+          seq: e.seq,
+          ts: e.ts,
+          session: e.session,
+          type: e.type,
+          payload: e.payload,
+          prev: e.prev,
+          hash: e.hash,
+        }),
+      )
+      .join("\n") + (events.length > 0 ? "\n" : "")
+  );
 }

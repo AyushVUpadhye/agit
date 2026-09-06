@@ -59,7 +59,9 @@ export class SessionFollower {
 
   private step(live: boolean): AgitEvent[] {
     if (this.finished && live) throw new Error("follower already finished");
-    const lines = readFileSync(this.path, "utf8").split("\n").filter((l) => l.trim() !== "");
+    const lines = readFileSync(this.path, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "");
     let drafts: DraftEvent[];
     let sessionId: string;
     try {
@@ -70,10 +72,13 @@ export class SessionFollower {
       return []; // nothing convertible yet (e.g. no conversation records so far)
     }
     if (this.sessionId === null) this.sessionId = sessionId;
-    else if (this.sessionId !== sessionId) throw new StabilityError(`session id changed from ${this.sessionId} to ${sessionId}`);
+    else if (this.sessionId !== sessionId)
+      throw new StabilityError(`session id changed from ${this.sessionId} to ${sessionId}`);
 
     if (drafts.length < this.sentDrafts) {
-      throw new StabilityError(`re-convert produced ${drafts.length} drafts, fewer than the ${this.sentDrafts} already streamed`);
+      throw new StabilityError(
+        `re-convert produced ${drafts.length} drafts, fewer than the ${this.sentDrafts} already streamed`,
+      );
     }
     // Full-prefix verification, not a boundary spot-check: recompute the
     // rolling digest over everything already streamed. Any rewrite of any
@@ -157,14 +162,18 @@ export function openInbox(relayUrl: string, share: ShareInfo, handlers: InboxHan
           signal: ctl.signal,
         });
         if (!res.ok || !res.body) throw new Error(`inbox: ${res.status}`);
-        await readSse(res.body, (event, data) => {
-          try {
-            if (event === "msg") handlers.onMessage?.(JSON.parse(data));
-            else if (event === "info") handlers.onInfo?.(JSON.parse(data));
-          } catch {
-            /* malformed frame from relay: ignore */
-          }
-        }, ctl.signal);
+        await readSse(
+          res.body,
+          (event, data) => {
+            try {
+              if (event === "msg") handlers.onMessage?.(JSON.parse(data));
+              else if (event === "info") handlers.onInfo?.(JSON.parse(data));
+            } catch {
+              /* malformed frame from relay: ignore */
+            }
+          },
+          ctl.signal,
+        );
       } catch {
         if (ctl.signal.aborted) return;
         await new Promise((r) => setTimeout(r, 2000));

@@ -8,7 +8,7 @@ describe("canonicalJson (SPEC §3)", () => {
 
   it("orders keys by UTF-16 code unit", () => {
     // "Z" (0x5A) < "a" (0x61); "é" (0xE9) after both.
-    expect(canonicalJson({ a: 1, Z: 2, "é": 3 })).toBe('{"Z":2,"a":1,"é":3}');
+    expect(canonicalJson({ a: 1, Z: 2, é: 3 })).toBe('{"Z":2,"a":1,"é":3}');
   });
 
   it("leaves array order alone", () => {

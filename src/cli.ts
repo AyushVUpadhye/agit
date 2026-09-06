@@ -12,11 +12,22 @@ import type { AgitEvent, SessionMeta } from "./format/events.js";
 import { redactDeep, type RedactionCounts } from "./redact.js";
 import { startRelay } from "./relay/relay.js";
 import {
-  createShare, endShare, openInbox, pushEvents, SessionFollower, StabilityError, type ShareInfo,
+  createShare,
+  endShare,
+  openInbox,
+  pushEvents,
+  SessionFollower,
+  StabilityError,
+  type ShareInfo,
 } from "./share.js";
 import {
-  listSessionIds, readSessionEvents, readSessionLines, readSessionMeta,
-  resolveSessionId, sessionDir, writeSession,
+  listSessionIds,
+  readSessionEvents,
+  readSessionLines,
+  readSessionMeta,
+  resolveSessionId,
+  sessionDir,
+  writeSession,
 } from "./store.js";
 import { eventLine, excerpt, fileStateAt, usageTotals } from "./state.js";
 
@@ -87,14 +98,23 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
 async function main(): Promise<number> {
   const { verb, opts } = parseArgs(process.argv.slice(2));
   switch (verb) {
-    case "import": return cmdImport(opts);
-    case "ls": return cmdLs(opts);
-    case "show": return cmdShow(opts);
-    case "verify": return cmdVerify(opts);
-    case "replay": return cmdReplay(opts);
-    case "share": return cmdShare(opts);
-    case "relay": return cmdRelay(opts);
-    case "help": console.log(USAGE); return 0;
+    case "import":
+      return cmdImport(opts);
+    case "ls":
+      return cmdLs(opts);
+    case "show":
+      return cmdShow(opts);
+    case "verify":
+      return cmdVerify(opts);
+    case "replay":
+      return cmdReplay(opts);
+    case "share":
+      return cmdShare(opts);
+    case "relay":
+      return cmdRelay(opts);
+    case "help":
+      console.log(USAGE);
+      return 0;
     default:
       console.error(`unknown command: ${verb}\n`);
       console.log(USAGE);
@@ -104,14 +124,19 @@ async function main(): Promise<number> {
 
 function cmdImport(opts: Opts): number {
   const src = opts.args[0];
-  if (!src) { console.error("usage: agit import <native-session.jsonl>"); return 2; }
+  if (!src) {
+    console.error("usage: agit import <native-session.jsonl>");
+    return 2;
+  }
   const path = resolve(src);
   const raw = readFileSync(path, "utf8");
   const lines = raw.split("\n").filter((l) => l.trim() !== "");
 
   const adapter = ADAPTERS.find((a) => a.detect(lines));
   if (!adapter) {
-    console.error("no adapter recognizes this file (adapters available: " + ADAPTERS.map((a) => a.name).join(", ") + ")");
+    console.error(
+      "no adapter recognizes this file (adapters available: " + ADAPTERS.map((a) => a.name).join(", ") + ")",
+    );
     return 1;
   }
 
@@ -139,14 +164,20 @@ function cmdImport(opts: Opts): number {
   console.log(`  events      ${events.length} (from ${converted.records} native records)`);
   const skippedTotal = Object.values(converted.skipped).reduce((a, b) => a + b, 0);
   if (skippedTotal > 0) {
-    const detail = Object.entries(converted.skipped).sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => `${k}×${v}`).join(", ");
+    const detail = Object.entries(converted.skipped)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k}×${v}`)
+      .join(", ");
     console.log(`  skipped     ${skippedTotal} native records with no mapping: ${detail}`);
   }
   const redactedTotal = Object.values(redactions).reduce((a, b) => a + b, 0);
-  console.log(redactedTotal > 0
-    ? `  redacted    ${redactedTotal}: ${Object.entries(redactions).map(([k, v]) => `${k}×${v}`).join(", ")}`
-    : `  redacted    nothing matched the credential patterns (SPEC §8 — a seatbelt, not a guarantee)`);
+  console.log(
+    redactedTotal > 0
+      ? `  redacted    ${redactedTotal}: ${Object.entries(redactions)
+          .map(([k, v]) => `${k}×${v}`)
+          .join(", ")}`
+      : `  redacted    nothing matched the credential patterns (SPEC §8 — a seatbelt, not a guarantee)`,
+  );
   console.log(`  head        ${meta.headHash.slice(0, 12)}`);
   console.log(`  wrote       ${sessionDir(opts.dir, converted.sessionId)}`);
   return 0;
@@ -154,7 +185,10 @@ function cmdImport(opts: Opts): number {
 
 function cmdLs(opts: Opts): number {
   const ids = listSessionIds(opts.dir);
-  if (ids.length === 0) { console.log("no sessions imported yet (agit import <file>)"); return 0; }
+  if (ids.length === 0) {
+    console.log("no sessions imported yet (agit import <file>)");
+    return 0;
+  }
   const rows = ids.map((id) => {
     const events = readSessionEvents(opts.dir, id);
     const first = events[0]!;
@@ -191,7 +225,8 @@ function cmdShow(opts: Opts): number {
   if (typeof start.gitBranch === "string" && start.gitBranch) console.log(`  branch      ${start.gitBranch}`);
   console.log(`  started     ${first.ts}`);
   console.log(`  duration    ${humanDuration(Date.parse(last.ts) - Date.parse(first.ts))}`);
-  if (meta) console.log(`  imported    ${meta.importedAt}  (adapter ${meta.adapter.name}@${meta.adapter.version})`);
+  if (meta)
+    console.log(`  imported    ${meta.importedAt}  (adapter ${meta.adapter.name}@${meta.adapter.version})`);
 
   const byType = new Map<string, number>();
   const tools = new Map<string, number>();
@@ -202,26 +237,43 @@ function cmdShow(opts: Opts): number {
       if (typeof name === "string") tools.set(name, (tools.get(name) ?? 0) + 1);
     }
   }
-  console.log(`  events      ${events.length}  (${[...byType.entries()].map(([t, n]) => `${t}×${n}`).join(", ")})`);
+  console.log(
+    `  events      ${events.length}  (${[...byType.entries()].map(([t, n]) => `${t}×${n}`).join(", ")})`,
+  );
   if (tools.size > 0) {
-    console.log(`  tools       ${[...tools.entries()].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}×${n}`).join(", ")}`);
+    console.log(
+      `  tools       ${[...tools.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, n]) => `${t}×${n}`)
+        .join(", ")}`,
+    );
   }
 
   const u = usageTotals(events);
   if (u.apiMessages > 0) {
     console.log(`  models      ${[...u.models].join(", ")}`);
-    console.log(`  tokens      in=${u.inputTokens} out=${u.outputTokens} cacheRead=${u.cacheReadInputTokens} cacheWrite=${u.cacheCreationInputTokens} (${u.apiMessages} API messages)`);
+    console.log(
+      `  tokens      in=${u.inputTokens} out=${u.outputTokens} cacheRead=${u.cacheReadInputTokens} cacheWrite=${u.cacheCreationInputTokens} (${u.apiMessages} API messages)`,
+    );
   }
 
   const files = fileStateAt(events);
   if (files.size > 0) {
-    console.log(`  files       ${files.size} touched via structured edits (shell-driven changes not tracked — SPEC §5.7)`);
+    console.log(
+      `  files       ${files.size} touched via structured edits (shell-driven changes not tracked — SPEC §5.7)`,
+    );
     for (const f of files.values()) {
-      console.log(`    ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed}, ${f.edits} edit${f.edits === 1 ? "" : "s"})`);
+      console.log(
+        `    ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed}, ${f.edits} edit${f.edits === 1 ? "" : "s"})`,
+      );
     }
   }
   if (meta && Object.keys(meta.redactions).length > 0) {
-    console.log(`  redactions  ${Object.entries(meta.redactions).map(([k, v]) => `${k}×${v}`).join(", ")}`);
+    console.log(
+      `  redactions  ${Object.entries(meta.redactions)
+        .map(([k, v]) => `${k}×${v}`)
+        .join(", ")}`,
+    );
   }
   return 0;
 }
@@ -232,7 +284,9 @@ function cmdVerify(opts: Opts): number {
   const meta = readSessionMeta(opts.dir, id) ?? undefined;
   const res = verifyChain(lines, meta);
   if (res.ok) {
-    console.log(`ok: ${res.events} events, chain intact${meta ? ", matches meta.json head" : " (no meta.json — truncation not checkable)"}`);
+    console.log(
+      `ok: ${res.events} events, chain intact${meta ? ", matches meta.json head" : " (no meta.json — truncation not checkable)"}`,
+    );
     return 0;
   }
   console.error(`BROKEN at seq ${res.firstBroken!.seq}: ${res.firstBroken!.reason}`);
@@ -245,7 +299,8 @@ async function cmdReplay(opts: Opts): Promise<number> {
   const events = readSessionEvents(opts.dir, id);
 
   if (opts.timeline || (opts.at === undefined && !process.stdin.isTTY)) {
-    for (const e of events) console.log(`${String(e.seq).padStart(5)}  ${e.ts.slice(11, 19)}  ${eventLine(e)}`);
+    for (const e of events)
+      console.log(`${String(e.seq).padStart(5)}  ${e.ts.slice(11, 19)}  ${eventLine(e)}`);
     return 0;
   }
 
@@ -261,8 +316,13 @@ async function cmdReplay(opts: Opts): Promise<number> {
     if (answer === "" || answer === "n") pos = clamp(pos + 1, 0, events.length - 1);
     else if (answer === "p") pos = clamp(pos - 1, 0, events.length - 1);
     else if (answer.startsWith("g")) pos = clamp(Number(answer.slice(1).trim()), 0, events.length - 1);
-    else if (answer === "s") { printStateAt(events, pos); continue; }
-    else { console.log("Enter/n next, p prev, g N goto, s state, q quit"); continue; }
+    else if (answer === "s") {
+      printStateAt(events, pos);
+      continue;
+    } else {
+      console.log("Enter/n next, p prev, g N goto, s state, q quit");
+      continue;
+    }
     printEventDetail(events, pos);
   }
   rl.close();
@@ -275,7 +335,9 @@ async function cmdRelay(opts: Opts): Promise<number> {
   console.log(`agit relay listening on http://${host}:${handle.port}`);
   console.log("shares are held in memory only; nothing is written to disk. Ctrl+C to stop.");
   if (host !== "127.0.0.1" && host !== "localhost") {
-    console.log("NOTE: bound beyond loopback — anyone who can reach this port can view shares they have links for. Prefer a TLS reverse proxy or tunnel.");
+    console.log(
+      "NOTE: bound beyond loopback — anyone who can reach this port can view shares they have links for. Prefer a TLS reverse proxy or tunnel.",
+    );
   }
   await waitForSigint();
   await handle.close();
@@ -284,8 +346,12 @@ async function cmdRelay(opts: Opts): Promise<number> {
 
 async function cmdShare(opts: Opts): Promise<number> {
   const target = opts.args[0];
-  if (!target) { console.error("usage: agit share <session-id | native-session.jsonl>"); return 2; }
-  const ttlMs = opts.ttlHours !== undefined && Number.isFinite(opts.ttlHours) ? opts.ttlHours * 3600_000 : undefined;
+  if (!target) {
+    console.error("usage: agit share <session-id | native-session.jsonl>");
+    return 2;
+  }
+  const ttlMs =
+    opts.ttlHours !== undefined && Number.isFinite(opts.ttlHours) ? opts.ttlHours * 3600_000 : undefined;
 
   // Resolve what we're sharing: a native log path (live-capable), or an
   // imported session — which is still live-capable when its source file exists.
@@ -304,9 +370,14 @@ async function cmdShare(opts: Opts): Promise<number> {
   }
   if (opts.static && nativePath !== null && staticEvents === null) {
     // --static on a path: one full (non-live) conversion, pushed once.
-    const lines = readFileSync(nativePath, "utf8").split("\n").filter((l) => l.trim() !== "");
+    const lines = readFileSync(nativePath, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "");
     const adapter = ADAPTERS.find((a) => a.detect(lines));
-    if (!adapter) { console.error("no adapter recognizes this file"); return 1; }
+    if (!adapter) {
+      console.error("no adapter recognizes this file");
+      return 1;
+    }
     const converted = adapter.convert(lines);
     const counts: RedactionCounts = {};
     for (const d of converted.drafts) d.payload = redactDeep(d.payload, counts);
@@ -339,7 +410,10 @@ async function cmdShare(opts: Opts): Promise<number> {
       await waitForSigint();
     } else {
       const adapter = pickAdapterFor(nativePath!);
-      if (!adapter) { console.error("no adapter recognizes this file"); return 1; }
+      if (!adapter) {
+        console.error("no adapter recognizes this file");
+        return 1;
+      }
       const follower = new SessionFollower(nativePath!, adapter);
       let pushed = 0;
       const pushNew = async (events: AgitEvent[]) => {
@@ -358,7 +432,9 @@ async function cmdShare(opts: Opts): Promise<number> {
           try {
             await pushNew(follower.poll());
           } catch (err) {
-            if (err instanceof StabilityError) { fatal = err; }
+            if (err instanceof StabilityError) {
+              fatal = err;
+            }
             // Other errors (relay hiccup, file mid-write) retry next tick.
           } finally {
             ticking = false;
@@ -368,11 +444,17 @@ async function cmdShare(opts: Opts): Promise<number> {
 
       await waitForSigint(() => fatal !== null);
       clearInterval(timer);
-      if (fatal !== null) { console.error((fatal as Error).message); return 1; }
+      if (fatal !== null) {
+        console.error((fatal as Error).message);
+        return 1;
+      }
       try {
         const tail = follower.finish();
         await pushNew(tail);
-        if (tail.length > 0) console.log(`sealed the stream with its final ${tail.length} events — it now matches a full import exactly.`);
+        if (tail.length > 0)
+          console.log(
+            `sealed the stream with its final ${tail.length} events — it now matches a full import exactly.`,
+          );
       } catch {
         /* best effort on shutdown */
       }
@@ -387,7 +469,9 @@ async function cmdShare(opts: Opts): Promise<number> {
 }
 
 function pickAdapterFor(path: string): Adapter | undefined {
-  const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim() !== "");
+  const lines = readFileSync(path, "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "");
   return ADAPTERS.find((a) => a.detect(lines));
 }
 
@@ -414,7 +498,9 @@ function waitForSigint(alsoWhen?: () => boolean): Promise<void> {
   return new Promise((resolveWait) => {
     // The ref'd interval both polls the extra condition and guarantees the
     // event loop stays alive while we wait (a SIGINT listener alone doesn't).
-    const check = setInterval(() => { if (alsoWhen?.()) done(); }, 250);
+    const check = setInterval(() => {
+      if (alsoWhen?.()) done();
+    }, 250);
     const done = () => {
       clearInterval(check);
       process.removeListener("SIGINT", done);
@@ -431,9 +517,12 @@ function printEventDetail(events: AgitEvent[], seq: number): void {
   switch (e.type) {
     case "message.user":
     case "message.assistant": {
-      const texts = e.type === "message.user"
-        ? [String(p.text ?? "")]
-        : (p.blocks as { type: string; text: string }[]).map((b) => (b.type === "thinking" ? `(thinking) ${b.text}` : b.text));
+      const texts =
+        e.type === "message.user"
+          ? [String(p.text ?? "")]
+          : (p.blocks as { type: string; text: string }[]).map((b) =>
+              b.type === "thinking" ? `(thinking) ${b.text}` : b.text,
+            );
       for (const t of texts) console.log(indentClip(t, 30));
       break;
     }
@@ -464,7 +553,9 @@ function printStateAt(events: AgitEvent[], seq: number): void {
     console.log("  no structured file edits yet");
   } else {
     for (const f of files.values()) {
-      console.log(`  ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed})  content sha256 ${f.afterHash.slice(0, 12)} @ seq ${f.lastSeq}`);
+      console.log(
+        `  ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed})  content sha256 ${f.afterHash.slice(0, 12)} @ seq ${f.lastSeq}`,
+      );
     }
     console.log("  (structured edits only — shell-driven changes are invisible here, SPEC §5.7)");
   }
@@ -479,7 +570,10 @@ function indentClip(text: string, maxLines: number): string {
 
 function requireId(opts: Opts): string {
   const arg = opts.args[0];
-  if (!arg) { console.error("missing <id> (agit ls to list sessions)"); process.exit(2); }
+  if (!arg) {
+    console.error("missing <id> (agit ls to list sessions)");
+    process.exit(2);
+  }
   return resolveSessionId(opts.dir, arg);
 }
 

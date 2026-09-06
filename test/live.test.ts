@@ -11,8 +11,16 @@ import { redactDeep, type RedactionCounts } from "../src/redact.js";
 import { SessionFollower, StabilityError } from "../src/share.js";
 import type { DraftEvent } from "../src/format/events.js";
 
-const FIXTURE = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures", "claude-code", "simple.jsonl");
-const lines = readFileSync(FIXTURE, "utf8").split("\n").filter((l) => l.trim() !== "");
+const FIXTURE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "fixtures",
+  "claude-code",
+  "simple.jsonl",
+);
+const lines = readFileSync(FIXTURE, "utf8")
+  .split("\n")
+  .filter((l) => l.trim() !== "");
 
 function liveDrafts(upto: number): DraftEvent[] {
   try {
@@ -37,7 +45,9 @@ describe("live conversion (PROTOCOL.md prefix stability)", () => {
     const live = claudeCodeAdapter.convert(lines, { live: true }).drafts;
     const full = claudeCodeAdapter.convert(lines).drafts;
     expect(full.length).toBe(live.length + 2); // pending msg_D cost + session.end
-    expect(full.slice(0, live.length).map((d) => canonicalJson(d))).toEqual(live.map((d) => canonicalJson(d)));
+    expect(full.slice(0, live.length).map((d) => canonicalJson(d))).toEqual(
+      live.map((d) => canonicalJson(d)),
+    );
     expect(full[full.length - 2]!.type).toBe("cost");
     expect(full[full.length - 1]!.type).toBe("session.end");
   });
@@ -81,9 +91,9 @@ describe("SessionFollower", () => {
     expect(follower.poll().length).toBeGreaterThan(0);
 
     // Rewrite history: change the user's message text in record 2.
-    const mutated = lines.slice(0, 6).map((l, i) =>
-      i === 1 ? l.replace("Add a greeting module", "Do something else entirely") : l,
-    );
+    const mutated = lines
+      .slice(0, 6)
+      .map((l, i) => (i === 1 ? l.replace("Add a greeting module", "Do something else entirely") : l));
     writeFileSync(path, mutated.join("\n") + "\n", "utf8");
     expect(() => follower.poll()).toThrow(StabilityError);
   });

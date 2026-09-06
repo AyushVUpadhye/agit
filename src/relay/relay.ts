@@ -116,15 +116,20 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
         msgTimes: [],
       };
       shares.set(share.id, share);
-      return json(res, 201, { shareId: share.id, writerToken: share.writerToken, ttlMs, path: `/s/${share.id}` });
+      return json(res, 201, {
+        shareId: share.id,
+        writerToken: share.writerToken,
+        ttlMs,
+        path: `/s/${share.id}`,
+      });
     }
 
-    let m: RegExpExecArray | null;
-    if ((m = /^\/s\/([A-Za-z0-9_-]{10,})$/.exec(path)) && req.method === "GET") {
+    if (req.method === "GET" && /^\/s\/[A-Za-z0-9_-]{10,}$/.test(path)) {
       // Serve the page even for unknown ids; it shows "expired" when the stream 404s.
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
-        "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'",
+        "content-security-policy":
+          "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'",
         "referrer-policy": "no-referrer",
         "x-content-type-options": "nosniff",
       });
@@ -132,7 +137,8 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
       return;
     }
 
-    if ((m = /^\/api\/shares\/([A-Za-z0-9_-]{10,})\/([a-z.]+)$/.exec(path))) {
+    const m = /^\/api\/shares\/([A-Za-z0-9_-]{10,})\/([a-z.]+)$/.exec(path);
+    if (m) {
       const share = shares.get(m[1]!);
       const verb = m[2]!;
       if (!share) return json(res, 404, { error: "no such share (expired?)" });
@@ -142,8 +148,10 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
         if (share.ended) return json(res, 409, { error: "share already ended" });
         const body = await readBody(req, LIMITS.pushBody);
         const events = (body as { events?: unknown })?.events;
-        if (!Array.isArray(events) || events.length === 0) return json(res, 400, { error: "body must be {events: [...]}" });
-        if (share.events.length + events.length > maxEvents) return json(res, 413, { error: "share event limit reached" });
+        if (!Array.isArray(events) || events.length === 0)
+          return json(res, 400, { error: "body must be {events: [...]}" });
+        if (share.events.length + events.length > maxEvents)
+          return json(res, 413, { error: "share event limit reached" });
         const err = appendEvents(share, events);
         if (err) return json(res, 409, { error: err });
         return json(res, 200, { stored: share.events.length });
@@ -162,7 +170,10 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
         const from = parseLastEventId(req) + 1;
         res.write(`event: info\ndata: ${JSON.stringify(infoOf(share))}\n\n`);
         for (let i = from; i < share.events.length; i++) sendEvent(res, i, share.events[i]!);
-        onClose(res, () => { share.viewers.delete(res); broadcast(share, "info", infoOf(share)); });
+        onClose(res, () => {
+          share.viewers.delete(res);
+          broadcast(share, "info", infoOf(share));
+        });
         broadcast(share, "info", infoOf(share));
         return;
       }
@@ -182,7 +193,8 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
         if (share.msgTimes.length >= LIMITS.msgsPerMinute) return json(res, 429, { error: "slow down" });
         const body = await readBody(req, LIMITS.messageBody);
         const textV = (body as { text?: unknown })?.text;
-        if (typeof textV !== "string" || textV.trim() === "") return json(res, 400, { error: "body must be {text, name?}" });
+        if (typeof textV !== "string" || textV.trim() === "")
+          return json(res, 400, { error: "body must be {text, name?}" });
         share.msgTimes.push(now);
         const nameV = (body as { name?: unknown })?.name;
         const msg = {
@@ -195,7 +207,10 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
       }
 
       if (verb === "events.jsonl" && req.method === "GET") {
-        res.writeHead(200, { "content-type": "application/jsonl; charset=utf-8", "x-content-type-options": "nosniff" });
+        res.writeHead(200, {
+          "content-type": "application/jsonl; charset=utf-8",
+          "x-content-type-options": "nosniff",
+        });
         for (const line of share.events) res.write(line + "\n");
         res.end();
         return;
@@ -223,7 +238,8 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
     for (const { line } of parsed) share.events.push(line);
     share.lastHash = last;
     for (const v of share.viewers) {
-      for (let i = share.events.length - parsed.length; i < share.events.length; i++) sendEvent(v, i, share.events[i]!);
+      for (let i = share.events.length - parsed.length; i < share.events.length; i++)
+        sendEvent(v, i, share.events[i]!);
     }
     return null;
   }

@@ -9,8 +9,16 @@ import { verifyChain } from "../src/format/verify.js";
 import { redactDeep, type RedactionCounts } from "../src/redact.js";
 import type { Json } from "../src/format/events.js";
 
-const FIXTURE = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures", "claude-code", "simple.jsonl");
-const lines = readFileSync(FIXTURE, "utf8").split("\n").filter((l) => l.trim() !== "");
+const FIXTURE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "fixtures",
+  "claude-code",
+  "simple.jsonl",
+);
+const lines = readFileSync(FIXTURE, "utf8")
+  .split("\n")
+  .filter((l) => l.trim() !== "");
 
 const BEFORE = "export function hello(name: string): string {\n  return `Hello, ${name}!`;\n}\n";
 const AFTER = "export function hello(name: string): string {\n  return `Hello, ${name}!!`;\n}\n";
@@ -36,19 +44,19 @@ describe("claude-code adapter", () => {
       "message.user",
       "message.assistant", // thinking
       "message.assistant", // text
-      "tool.call",         // Write
-      "cost",              // msg_A, deduped across three records
+      "tool.call", // Write
+      "cost", // msg_A, deduped across three records
       "tool.result",
-      "file.diff",         // create
-      "tool.call",         // Edit
-      "cost",              // msg_B
+      "file.diff", // create
+      "tool.call", // Edit
+      "cost", // msg_B
       "tool.result",
-      "file.diff",         // modify
-      "tool.call",         // Bash
-      "cost",              // msg_C
+      "file.diff", // modify
+      "tool.call", // Bash
+      "cost", // msg_C
       "tool.result",
       "message.assistant", // Done.
-      "cost",              // msg_D, flushed at EOF
+      "cost", // msg_D, flushed at EOF
       "session.end",
     ]);
   });
@@ -93,7 +101,9 @@ describe("claude-code adapter", () => {
 
   it("derives file.diff with correct before/after hashes for create and modify", () => {
     const res = claudeCodeAdapter.convert(lines);
-    const diffs = res.drafts.filter((d) => d.type === "file.diff").map((d) => d.payload as Record<string, Json>);
+    const diffs = res.drafts
+      .filter((d) => d.type === "file.diff")
+      .map((d) => d.payload as Record<string, Json>);
     expect(diffs).toHaveLength(2);
 
     const create = diffs[0]!;

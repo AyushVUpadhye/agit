@@ -51,7 +51,9 @@ export function readSessionEvents(base: string, id: string): AgitEvent[] {
   for (const line of readSessionLines(base, id)) {
     const e = JSON.parse(line) as AgitEvent;
     if (typeof e.type !== "string" || !isEventType(e.type)) {
-      throw new Error(`event ${e.seq}: unknown type ${JSON.stringify(e.type)} — was this written by a newer agit?`);
+      throw new Error(
+        `event ${e.seq}: unknown type ${JSON.stringify(e.type)} — was this written by a newer agit?`,
+      );
     }
     events.push(e);
   }
