@@ -27,7 +27,7 @@ const store = mkdtempSync(join(tmpdir(), "agit-demo-"));
 
 const COLS = 114;
 const ROWS = 28;
-let t = 0.5;
+let t = 0.0;
 const events = [];
 const out = (s) => events.push([Number(t.toFixed(3)), "o", s]);
 const crlf = (s) => s.replace(/\r?\n/g, "\r\n");
@@ -52,10 +52,16 @@ function run(args, input) {
   return (r.stdout ?? "") + (r.stderr ?? "");
 }
 
-function cmd(display, args, { pause = 1.3, lineDelay = 0.04, input } = {}) {
+function cmd(display, args, { pause = 1.3, lineDelay = 0.04, input, instant = false } = {}) {
   out(PROMPT);
-  type(display);
-  t += 0.4;
+  if (instant) {
+    // The very first frame opens on the command itself, never a bare cursor.
+    out(display);
+    t += 0.7;
+  } else {
+    type(display);
+    t += 0.4;
+  }
   out("\r\n");
   t += 0.12;
   const lines = crlf(run(args, input)).split("\r\n");
@@ -67,16 +73,16 @@ function cmd(display, args, { pause = 1.3, lineDelay = 0.04, input } = {}) {
   t += pause;
 }
 
-// The storyboard: import -> verify -> the whole timeline -> jump to the
-// divergent diff -> file state proving something changed outside the log.
-cmd("agit import fixtures/claude-code/demo.jsonl", ["import", FIXTURE], { pause: 1.7 });
-cmd("agit verify demo", ["verify", "demo"], { pause: 1.5 });
-cmd("agit replay demo --timeline", ["replay", "demo", "--timeline"], { pause: 2.0, lineDelay: 0.055 });
-cmd("agit replay demo --at 24", ["replay", "demo", "--at", "24"], { pause: 2.0, input: "" });
+// The storyboard leads with the payoff: import, then straight to the
+// divergent diff + file state proof ([DIVERGED]) while the reader is still
+// watching, then a verify beat, then the full timeline as closing context.
+cmd("agit import fixtures/claude-code/demo.jsonl", ["import", FIXTURE], { pause: 1.2, instant: true });
 cmd("agit replay demo --at 24 --state", ["replay", "demo", "--at", "24", "--state"], {
-  pause: 3.2,
+  pause: 3.0,
   input: "",
 });
+cmd("agit verify demo", ["verify", "demo"], { pause: 1.3 });
+cmd("agit replay demo --timeline", ["replay", "demo", "--timeline"], { pause: 3.2, lineDelay: 0.05 });
 
 rmSync(store, { recursive: true, force: true });
 
