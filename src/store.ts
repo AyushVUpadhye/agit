@@ -12,7 +12,31 @@ export function sessionDir(base: string, id: string): string {
   return join(agitDir(base), "sessions", id);
 }
 
+/**
+ * SPEC.md §1: a session id MUST be safe as a directory name,
+ * `[A-Za-z0-9._-]+`. That charset already excludes path separators, but "."
+ * and ".." both match it while still being directory-traversal escapes (the
+ * sessions dir itself, or its parent) — reject those explicitly.
+ *
+ * This matters because a session id is untrusted input: it comes straight
+ * from the native log being imported (`rec.sessionId`), a file agit treats
+ * as adversarial everywhere else. Without this check, an `agit import` of a
+ * crafted log with e.g. `"sessionId": "../../../../tmp/pwned"` writes
+ * events.jsonl/meta.json outside .agit/sessions entirely.
+ */
+const SAFE_SESSION_ID = /^[A-Za-z0-9._-]+$/;
+
+export function assertSafeSessionId(id: string): void {
+  if (typeof id !== "string" || id === "" || id === "." || id === ".." || !SAFE_SESSION_ID.test(id)) {
+    throw new Error(
+      `refusing unsafe session id ${JSON.stringify(id)}: must match ${SAFE_SESSION_ID.source} ` +
+        `and not be "." or ".." (SPEC.md §1)`,
+    );
+  }
+}
+
 export function writeSession(base: string, id: string, eventsJsonl: string, meta: SessionMeta): void {
+  assertSafeSessionId(id);
   const dir = sessionDir(base, id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "events.jsonl"), eventsJsonl, "utf8");
