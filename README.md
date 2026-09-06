@@ -98,7 +98,10 @@ Said plainly:
   aspirational.
 - **`file.diff` coverage is partial.** Diffs come from structured edit tools
   (`Edit`/`Write`). Files changed through shell commands leave no diff event;
-  file state from replay is a lower bound on what changed.
+  file state from replay is a lower bound on what changed. Fork trees
+  inherit this blind spot: a file the log never structurally edited is
+  absent from the tree entirely, and — since there are no deletion events —
+  a file deleted mid-session still appears at its last logged content.
 - **No message injection into a running session.** Sharing is watch-only:
   viewer messages reach the sharing human's terminal, clearly attributed —
   they are never fed to the agent. Claude Code has no supported way to
@@ -110,6 +113,9 @@ Said plainly:
   until the link expires.
 - **No TLS in the relay.** It binds loopback by default; exposing it to a
   network means putting a TLS proxy or tunnel in front (PROTOCOL.md).
+- **A `pr` bundle cannot be imported into a store yet.** `agit verify`
+  reads its `events.jsonl` directly, but replaying or forking the bundled
+  log on another machine still requires importing the source's native log.
 - **Merge is file-level and needs git.** Three-way content merge only:
   deletions in a fork are invisible (the fork tree records what the log
   could reconstruct, so absence means untouched, not deleted), renames are
