@@ -34,7 +34,7 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
   (`~/.claude/projects/<project>/<uuid>.jsonl`) into
   `.agit/sessions/<id>/events.jsonl`. Deterministic: the same input always
   produces byte-identical output. Credential-looking strings are redacted on
-  the way in (see [SPEC.md §8](SPEC.md) for exactly what is and isn't caught).
+  the way in (see [SPEC.md section 8](SPEC.md) for exactly what is and isn't caught).
 - **`agit ls`** — list imported sessions: start, duration, events, files touched.
 - **`agit show <id>`** — one-session summary: model, tools, token totals,
   per-file diffstat.
