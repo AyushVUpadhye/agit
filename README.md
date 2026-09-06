@@ -1,6 +1,7 @@
 # agit — git for running agents
 
 [![ci](https://github.com/thegoodengineers/agit/actions/workflows/ci.yml/badge.svg)](https://github.com/thegoodengineers/agit/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/agitsh)](https://www.npmjs.com/package/agitsh)
 
 An AI coding session is trapped: one terminal, one machine, a proprietary log
 format, one pair of eyes. When it ends you're left with changed files and a
@@ -15,8 +16,11 @@ every agent, the way git sits above every editor.
 
 *(a synthetic fixture session — real ones look the same, only longer)*
 
-Not on npm yet — the `agitsh` package name is reserved for the first
-release. Until then, install from source:
+```
+npm install -g agitsh
+```
+
+Or, for contributors, from source:
 
 ```
 git clone https://github.com/thegoodengineers/agit && cd agit
