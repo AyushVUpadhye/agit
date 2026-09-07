@@ -3,6 +3,23 @@
 Notable changes to agit. The event format itself is versioned separately
 (SPEC.md §11); a spec bump is always called out here in bold.
 
+## 0.3.1 — 2026-09-07
+
+### Fixed
+
+Pre-launch adversarial testing (hostile inputs, corrupted stores, 200-round
+adapter fuzzing; verify held against every tamper class tested):
+
+- Adapters skip-count JSON lines that parse to null/scalar/array instead of
+  crashing the import on the first property read.
+- UTF-8 BOMs no longer break imports (codex lost session_meta entirely;
+  claude dropped its first record).
+- One corrupt stored session no longer crashes all of agit ls; verbs on it
+  say re-import instead of throwing a bare TypeError.
+- share without a running relay explains itself (start agit relay / pass
+  --relay) instead of printing fetch failed; relay on a busy port hints
+  --port instead of raw EADDRINUSE.
+
 ## 0.3.0 — 2026-09-07
 
 ### Added
