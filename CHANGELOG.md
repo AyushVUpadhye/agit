@@ -7,6 +7,21 @@ Notable changes to agit. The event format itself is versioned separately
 
 ### Added
 
+### Fixed (community PRs #19–#23)
+
+- The verifier reports a valid-JSON-but-not-an-object line (null, a scalar,
+  an array) as a broken chain instead of crashing on it; display verbs name
+  the offending line instead of throwing a bare TypeError.
+- Detail views no longer collapse the indentation out of diffs and
+  pretty-printed tool input (new clipLine beside the one-line excerpt).
+- SEED.md quotes messages verbatim — truncated, never reflowed — as its own
+  header promises.
+- Adapter detect() scans the first 25 lines for a native record instead of
+  judging the file by its first line, so logs opening with a summary or
+  snapshot record import instead of being refused.
+- agit merge survives files over 1 MB: git merge-file now writes in place
+  instead of piping through execFileSync's capped stdout (ENOBUFS).
+
 ### Fixed (community PRs #15–#18, first outside contributions)
 
 - Session ids from native logs are rejected unless directory-safe — a
