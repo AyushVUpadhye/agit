@@ -7,6 +7,13 @@ Notable changes to agit. The event format itself is versioned separately
 
 ### Added
 
+- Share hardening (#4 closed): idle tailing polls cost one stat() call
+  (byte-offset tailing rejected with a test — it cannot see prefix
+  rewrites); the relay sheds SSE connections buffering past 8MB
+  (Last-Event-ID reconnects catch up losslessly); PROTOCOL.md gains
+  concrete TLS deployment shapes and a normative five-point v1 freeze
+  checklist.
+
 ### Fixed (community PRs #19–#23)
 
 - The verifier reports a valid-JSON-but-not-an-object line (null, a scalar,
