@@ -117,6 +117,50 @@ describe("relay protocol v0", () => {
     await endShare(base, share);
   });
 
+  it("sheds a viewer whose outbound SSE buffer exceeds the backpressure bound", async () => {
+    const share = await createShare(base);
+
+    const url = new URL(`/api/shares/${share.shareId}/stream`, base);
+    const viewerClosed = new Promise<void>((resolve) => {
+      const req = httpRequest(
+        {
+          hostname: url.hostname,
+          port: url.port,
+          path: url.pathname,
+          headers: { accept: "text/event-stream" },
+        },
+        (res) => {
+          res.pause();
+          res.on("close", () => resolve());
+        },
+      );
+      req.on("error", () => resolve());
+      req.end();
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const session = `backpressure-${Date.now()}`;
+    const payload = "x".repeat(16 * 1024);
+    const drafts = Array.from({ length: 600 }, (_, i) => ({
+      type: "message.assistant" as const,
+      ts: new Date(i).toISOString(),
+      payload: { text: payload },
+    }));
+    const events = buildChain(session, drafts);
+
+    await pushEvents(base, share, events);
+
+    await expect(
+      Promise.race([
+        viewerClosed.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 3000)),
+      ]),
+    ).resolves.toBe(true);
+
+    await endShare(base, share);
+  });
+
   it("delivers viewer messages to the writer inbox and caps their size", async () => {
     const share = await createShare(base);
     const got: { name: string; text: string }[] = [];
