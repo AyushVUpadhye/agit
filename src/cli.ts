@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { claudeCodeAdapter } from "./adapters/claude-code.js";
 import { codexAdapter } from "./adapters/codex.js";
+import { openclawAdapter } from "./adapters/openclaw.js";
 import type { Adapter } from "./adapters/adapter.js";
 import { buildChain, sha256Hex, toJsonl } from "./format/hash.js";
 import { verifyChain } from "./format/verify.js";
@@ -40,7 +41,7 @@ import {
 } from "./store.js";
 import { clipLine, fileStateAt, timelineLines, usageTotals } from "./state.js";
 
-const ADAPTERS: Adapter[] = [claudeCodeAdapter, codexAdapter];
+const ADAPTERS: Adapter[] = [claudeCodeAdapter, codexAdapter, openclawAdapter];
 const DEFAULT_RELAY = process.env.AGIT_RELAY ?? "http://127.0.0.1:7717";
 
 const USAGE = `agit — git for running agents
