@@ -80,6 +80,7 @@ options:
   --static         share the log as it is now; do not tail for growth
   --port <n>       relay: port to listen on (default 7717)
   --host <addr>    relay: address to bind (default 127.0.0.1; 0.0.0.0 exposes it)
+  --trusted-proxy <addr>  relay: trust X-Forwarded-For from this proxy (repeatable)
 
 <id> accepts any unique prefix. See SPEC.md for the format, PROTOCOL.md for the relay.`;
 
@@ -98,6 +99,7 @@ interface Opts {
   resume: boolean;
   port?: number;
   host?: string;
+  trustedProxies: string[];
   args: string[];
 }
 
@@ -110,6 +112,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     relay: DEFAULT_RELAY,
     static: false,
     resume: false,
+    trustedProxies: [],
     args: [],
   };
   const rest: string[] = [];
@@ -129,6 +132,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     else if (a === "--resume") opts.resume = true;
     else if (a === "--port") opts.port = Number(argv[++i]);
     else if (a === "--host") opts.host = argv[++i];
+    else if (a === "--trusted-proxy") opts.trustedProxies.push(argv[++i] ?? "");
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else rest.push(a);
   }
@@ -668,7 +672,7 @@ function cmdExport(opts: Opts): number {
 async function cmdRelay(opts: Opts): Promise<number> {
   let handle;
   try {
-    handle = await startRelay({ port: opts.port, host: opts.host });
+    handle = await startRelay({ port: opts.port, host: opts.host, trustedProxies: opts.trustedProxies });
   } catch (err) {
     if ((err as { code?: string }).code === "EADDRINUSE") {
       console.error(
