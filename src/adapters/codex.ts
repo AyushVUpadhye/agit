@@ -32,7 +32,7 @@
  *               are real only when agit already holds that file's content
  *               from earlier in the same session, and the change is skipped
  *               otherwise rather than hashed on a guess
- *     delete -> content known, but SPEC has no deletion event (agit issue #3)
+ *     delete -> content known, but SPEC has no deletion event (agit #30)
  *   Patches that failed or were declined changed nothing and are skipped.
  */
 
