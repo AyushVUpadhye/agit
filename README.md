@@ -17,6 +17,13 @@ every agent, the way git sits above every editor.
 
 *(a synthetic fixture session — real ones look the same, only longer)*
 
+agit is not an observability platform. Those ask you to instrument your
+agents with an SDK, and they show you what that instrumentation captured.
+agit reads the logs your runtime already wrote, on your own machine, with
+nothing to adopt in advance. And because every event carries content
+hashes, agit can prove when a log is incomplete rather than quietly
+presenting a partial picture as the whole story.
+
 ```
 npm install -g agitsh
 ```
@@ -97,15 +104,15 @@ fall out of that chain.
 
 Said plainly:
 
-- **Two adapters, unevenly deep.** Claude Code is the reference. The Codex
-  adapter maps structured `apply_patch` edits to hash-verified `file.diff`
-  events, with real limits: Codex records the full content of a file it
-  *creates*, but only a diff when it *updates*, so agit can verify an update
-  only while it already holds that file's content from earlier in the same
-  session — an edit to a file that predates the session is skipped and
-  counted, never hashed on a guess. Deletions and renames are skipped too
-  (no event type says either). Codex reasoning arrives encrypted and is
-  dropped, counted. OpenClaw is next.
+- **Two adapters, with different limits.** Claude Code is the reference;
+  Codex is mapped from its own structured edit records. OpenClaw is next.
+- **Codex updates have a verification window.** Codex records a file's full
+  content when it *creates* one, but only a diff when it *updates* one — so
+  agit can verify an update only while it already holds that file's content
+  from earlier in the same session. An edit to a file that predates the
+  session is skipped and counted, never hashed on a guess.
+- **Codex deletions and renames are skipped** — no event type says either.
+- **Codex reasoning arrives encrypted** and is dropped, counted.
 - **`file.diff` coverage is partial.** Diffs come from structured edit tools
   (`Edit`/`Write`). Files changed through shell commands leave no diff event;
   file state from replay is a lower bound on what changed. Fork trees
