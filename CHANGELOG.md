@@ -3,6 +3,20 @@
 Notable changes to agit. The event format itself is versioned separately
 (SPEC.md §11); a spec bump is always called out here in bold.
 
+## 0.4.1 — 2026-09-08
+
+### Changed
+
+- README: the Codex limits are four scannable bullets instead of one long
+  paragraph — the verification window on updates, skipped deletions and
+  renames, and encrypted reasoning each stand alone. The heading no longer
+  says the Codex adapter is shallower than the Claude Code one; it emits
+  hash-verified diffs and is constrained differently.
+- README: states plainly how agit differs from observability platforms —
+  those instrument agents with an SDK and show what that instrumentation
+  captured; agit reads logs the runtime already wrote and can prove when
+  they are incomplete.
+
 ## 0.4.0 — 2026-09-08
 
 ### Added
