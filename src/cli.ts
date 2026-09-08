@@ -11,6 +11,7 @@ import { buildChain, sha256Hex, toJsonl } from "./format/hash.js";
 import { verifyChain } from "./format/verify.js";
 import { SCHEMA_VERSION, type AgitEvent, type SessionMeta } from "./format/events.js";
 import { writeFork } from "./fork.js";
+import { renderSessionHtml } from "./html.js";
 import { mergeFork, readForkInfo } from "./merge.js";
 import { redactDeep, type RedactionCounts } from "./redact.js";
 import { startRelay } from "./relay/relay.js";
@@ -58,6 +59,7 @@ usage:
   agit replay <id> --timeline          print the whole timeline, one line per event
   agit export <id> [--json]            write the event log to stdout — JSONL, or a
                                        JSON array with --json — for other tools
+  agit export-html <id> [--out FILE]   write a self-contained, offline HTML session viewer
   agit fork <id> --at N [--out DIR]    branch at event N: reconstruct the file tree
                                        (hash-verified) and write a context seed
   agit merge <fork-dir> [--into DIR]   three-way merge a fork's files back
@@ -152,6 +154,8 @@ async function main(): Promise<number> {
       return cmdReplay(opts);
     case "export":
       return cmdExport(opts);
+    case "export-html":
+      return cmdExportHtml(opts);
     case "fork":
       return cmdFork(opts);
     case "merge":
@@ -662,6 +666,39 @@ function cmdExport(opts: Opts): number {
     // JSONL: the stored log verbatim, hash chain intact — pipe it anywhere.
     for (const line of readSessionLines(opts.dir, id)) process.stdout.write(line + "\n");
   }
+  return 0;
+}
+
+function cmdExportHtml(opts: Opts): number {
+  const id = requireId(opts);
+  const lines = readSessionLines(opts.dir, id);
+  const meta = readSessionMeta(opts.dir, id);
+  const check = verifyChain(
+    lines,
+    meta ? { eventCount: meta.eventCount, headHash: meta.headHash } : undefined,
+  );
+
+  if (!check.ok) {
+    console.error(`refusing to export an unverifiable session: ${check.firstBroken?.reason ?? "invalid chain"}`);
+    return 1;
+  }
+
+  const events = readSessionEvents(opts.dir, id);
+  const outPath = resolve(opts.out ?? `agit-${id.slice(0, 8)}.html`);
+
+  if (existsSync(outPath)) {
+    console.error(`refusing to overwrite existing ${outPath} — pass a fresh --out`);
+    return 1;
+  }
+
+  const html = renderSessionHtml(events, meta);
+  writeFileSync(outPath, html, "utf8");
+
+  console.log(`exported session ${id} to:`);
+  console.log(`  ${outPath}`);
+  console.log(`  ${events.length} events`);
+  console.log("  self-contained HTML — no network or external resources");
+
   return 0;
 }
 
