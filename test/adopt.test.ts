@@ -59,6 +59,33 @@ describe("adopting an agit bundle (agit import <bundle>)", () => {
     expect(existsSync(join(store, ".agit", "sessions", "demo-ratelimit-0001", "events.jsonl"))).toBe(true);
   });
 
+  it("creates a portable handoff bundle through the pr CLI", () => {
+    const store = freshStore();
+    const out = join(mkdtempSync(join(tmpdir(), "agit-pr-e2e-")), "bundle");
+
+    const imported = agit(["import", FIXTURE, "--dir", store]);
+    expect(imported.code).toBe(0);
+
+    const pr = agit(["pr", "demo", "--out", out, "--dir", store]);
+
+    expect(pr.code).toBe(0);
+    expect(pr.out).toContain("handoff bundle for demo-ratelimit-0001 at event 30");
+    expect(pr.out).toContain("events.jsonl");
+    expect(pr.out).toContain("tree/");
+    expect(pr.out).toContain("SEED.md");
+    expect(pr.out).toContain("fork.json");
+
+    expect(existsSync(join(out, "events.jsonl"))).toBe(true);
+    expect(existsSync(join(out, "meta.json"))).toBe(true);
+    expect(existsSync(join(out, "tree"))).toBe(true);
+    expect(existsSync(join(out, "SEED.md"))).toBe(true);
+    expect(existsSync(join(out, "fork.json"))).toBe(true);
+
+    const verified = agit(["verify", join(out, "events.jsonl")]);
+    expect(verified.code).toBe(0);
+    expect(verified.out).toContain("chain intact");
+  });
+
   it("stores the log byte for byte, so the origin's hashes still verify", () => {
     const store = freshStore();
     agit(["import", bundle, "--dir", store]);
