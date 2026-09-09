@@ -1,6 +1,6 @@
-# agit event format — v1
+# agit event format — v2
 
-Status: draft. This document is normative for schema version `1`.
+Status: draft. This document is normative for schema version `2`.
 
 An agit session is an append-only JSONL event log: one JSON object per line,
 UTF-8, `\n` line endings, never rewritten. Every event is hash-chained to the
@@ -33,7 +33,7 @@ Every line is a JSON object with exactly these top-level fields:
 
 | field     | type            | meaning                                              |
 |-----------|-----------------|------------------------------------------------------|
-| `v`       | integer         | schema version. `1` for this spec.                   |
+| `v`       | integer         | schema version. `2` for this spec.                   |
 | `seq`     | integer         | 0-based, contiguous, strictly increasing by 1.       |
 | `ts`      | string          | ISO-8601 UTC with milliseconds, e.g. `2026-09-06T10:00:00.000Z`. Sourced from the native record when available. |
 | `session` | string          | the session id (same for every event in the file).   |
@@ -45,7 +45,7 @@ Every line is a JSON object with exactly these top-level fields:
 `seq` is the ordering. `ts` SHOULD be non-decreasing but readers MUST NOT
 rely on it: it is source data, and clocks are what they are.
 
-Readers MUST reject a v1 event whose `type` is not listed in §5, and MUST
+Readers MUST reject a v2 event whose `type` is not listed in §5, and MUST
 ignore unknown fields inside `payload` (forward compatibility lives there).
 
 ## 3. Canonical serialization
@@ -84,7 +84,7 @@ redaction (§8) happens before hashing. Tamper-evidence begins at import.
 
 ## 5. Event types
 
-Eight types. Payloads MAY carry a `native` object holding runtime-specific
+Nine types. Payloads MAY carry a `native` object holding runtime-specific
 identifiers (record UUIDs, parent pointers, API message ids); core verbs
 MUST NOT require it.
 
@@ -180,7 +180,28 @@ and `Write`). Files changed through shell commands leave no `file.diff`;
 reconstructing "file state at event N" from these events is a lower bound on
 what actually changed.
 
-### 5.8 `cost`
+### 5.8 `file.delete`
+
+```json
+{ "path": "C:\\repo\\src\\a.ts",
+  "beforeHash": "hex sha-256",
+  "toolUseId": "toolu_...", "source": "apply_patch" }
+```
+
+Emitted when the runtime records a structured deletion. `beforeHash` is the
+SHA-256 over the UTF-8 bytes of the full file content immediately before
+deletion. `path` is verbatim from the runtime (absolute, OS-native
+separators).
+
+`file.delete` does not have an `afterHash`: the file does not exist after the
+event. A deletion MUST only be emitted when the adapter can establish the
+pre-deletion content and therefore `beforeHash`; adapters MUST skip and log
+deletions whose prior content is unavailable rather than guessing the hash.
+
+Coverage is partial. Files deleted through shell commands leave no
+`file.delete`; agit MUST NOT infer deletions from shell commands.
+
+### 5.9 `cost`
 
 ```json
 { "model": "claude-opus-5",
@@ -277,5 +298,5 @@ and `headHash` to detect truncation when present.
 
 `v` is bumped only for changes that alter the meaning or hashing of existing
 fields. Adding a new event type or a new payload field is also a `v` bump in
-v1 (readers reject unknown types). Adapters carry their own versions;
+v2 (readers reject unknown types). Adapters carry their own versions;
 `meta.json` says which one wrote the log.

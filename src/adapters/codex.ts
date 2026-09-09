@@ -441,8 +441,23 @@ function emitFileDiffs(args: {
     }
 
     if (kind === "delete") {
+      const before = known.get(path);
+      if (before === undefined) {
+        skip("patch_apply:delete(base content not in log)");
+        continue;
+      }
+
+      body.push({
+        ts,
+        type: "file.delete",
+        payload: {
+          path,
+          beforeHash: sha256Utf8(before),
+          toolUseId: callId,
+          source: "apply_patch",
+        },
+      });
       known.delete(path);
-      skip("patch_apply:delete(no deletion event in SPEC)");
       continue;
     }
     skip(`patch_apply:${kind || "?"}`);

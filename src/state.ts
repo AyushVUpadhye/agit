@@ -145,6 +145,8 @@ export function eventLine(e: AgitEvent): string {
       const { added, removed } = diffStat(str(p.diff));
       return `file.diff      ${str(p.kind)} ${str(p.path)} (+${added} -${removed})`;
     }
+    case "file.delete":
+      return `file.delete    ${str(p.path)}`;
     case "cost": {
       const u = (p.usage ?? {}) as { [k: string]: Json };
       return `cost           ${str(p.model)} in=${num(u.inputTokens)} out=${num(u.outputTokens)} cacheRead=${num(u.cacheReadInputTokens)}`;

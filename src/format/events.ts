@@ -1,6 +1,6 @@
-/** Core event types for the agit v1 format. See SPEC.md. */
+/** Core event types for the agit v2 format. See SPEC.md. */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const EVENT_TYPES = [
   "session.start",
@@ -10,6 +10,7 @@ export const EVENT_TYPES = [
   "tool.call",
   "tool.result",
   "file.diff",
+  "file.delete",
   "cost",
 ] as const;
 
