@@ -72,6 +72,14 @@ late viewers), whichever comes first — the reaper closes all streams and
 drops the buffer. Defaults: 200 concurrent shares, 200k events per share,
 25MB per push, 4000-char messages, 30 messages/minute per sender per share (the message endpoint is unauthenticated, so the budget must isolate senders).
 
+Sender identity is the connecting socket address by default. Behind a
+reverse proxy every viewer therefore looks like the proxy, and the
+per-sender budget collapses into one shared bucket — start the relay with
+`--trusted-proxy <addr>` (repeatable) to trust `X-Forwarded-For` from that
+address instead. The header is walked right to left, skipping trusted hops,
+and is ignored entirely from any address not on that list, so a viewer
+cannot spoof its way into someone else'''s budget.
+
 Slow consumers are shed, not accumulated: an SSE connection whose outbound
 buffer passes 8MB is destroyed. A healthy-but-slow browser reconnects with
 `Last-Event-ID` and replays what it missed from the relay's buffer; a dead

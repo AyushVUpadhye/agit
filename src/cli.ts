@@ -81,6 +81,7 @@ options:
   --static         share the log as it is now; do not tail for growth
   --port <n>       relay: port to listen on (default 7717)
   --host <addr>    relay: address to bind (default 127.0.0.1; 0.0.0.0 exposes it)
+  --trusted-proxy <addr>  relay: trust X-Forwarded-For from this proxy (repeatable)
 
 <id> accepts any unique prefix. See SPEC.md for the format, PROTOCOL.md for the relay.`;
 
@@ -99,6 +100,7 @@ interface Opts {
   resume: boolean;
   port?: number;
   host?: string;
+  trustedProxies: string[];
   args: string[];
 }
 
@@ -111,6 +113,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     relay: DEFAULT_RELAY,
     static: false,
     resume: false,
+    trustedProxies: [],
     args: [],
   };
   const rest: string[] = [];
@@ -130,6 +133,7 @@ function parseArgs(argv: string[]): { verb: string; opts: Opts } {
     else if (a === "--resume") opts.resume = true;
     else if (a === "--port") opts.port = Number(argv[++i]);
     else if (a === "--host") opts.host = argv[++i];
+    else if (a === "--trusted-proxy") opts.trustedProxies.push(argv[++i] ?? "");
     else if (a === "--help" || a === "-h") rest.unshift("help");
     else rest.push(a);
   }
@@ -316,6 +320,15 @@ function adoptBundle(opts: Opts, path: string, raw: string): number {
 
   const first = JSON.parse(lines[0]!) as AgitEvent;
   const id = first.session;
+  for (let i = 1; i < res.events; i++) {
+    const event = JSON.parse(lines[i]!) as AgitEvent;
+    if (event.session !== id) {
+      console.error(
+        `refusing to adopt: mixed session ids (event ${event.seq} belongs to ${event.session}, expected ${id})`,
+      );
+      return 1;
+    }
+  }
   try {
     assertSafeSessionId(id);
   } catch (err) {
@@ -331,7 +344,7 @@ function adoptBundle(opts: Opts, path: string, raw: string): number {
   if (listSessionIds(opts.dir).includes(id)) {
     // Re-adopting the same bundle is a no-op; a different log under the same
     // id is someone else's session and is never overwritten.
-    const existing = readSessionLines(opts.dir, id).join("\n") + "\n";
+    const existing = readFileSync(join(sessionDir(opts.dir, id), "events.jsonl"), "utf8");
     if (existing === jsonl) {
       console.log(`already adopted ${id} (identical log; nothing to do)`);
       return 0;
@@ -669,7 +682,7 @@ function cmdExport(opts: Opts): number {
 async function cmdRelay(opts: Opts): Promise<number> {
   let handle;
   try {
-    handle = await startRelay({ port: opts.port, host: opts.host });
+    handle = await startRelay({ port: opts.port, host: opts.host, trustedProxies: opts.trustedProxies });
   } catch (err) {
     if ((err as { code?: string }).code === "EADDRINUSE") {
       console.error(
