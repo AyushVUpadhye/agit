@@ -45,12 +45,25 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
   **Claude Code** (`~/.claude/projects/<project>/<uuid>.jsonl`) and
   **Codex CLI** (`~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl`) — the
   same event log, the same verbs, whichever agent produced the session.
+  `agit import --all` finds every session those runtimes have written on
+  this machine (`~/.claude/projects`, `~/.codex/sessions`,
+  `~/.openclaw/agents/*/sessions`) and imports what is new; `--latest`
+  takes just the most recent one; `--since 7d` bounds the scan. A directory
+  listing plus the ordinary import — no daemon, no hooks — and last month's
+  sessions are found the same way as today's.
   Deterministic: the same input always produces byte-identical output.
   Credential-looking strings are redacted on the way in (see
   [SPEC.md section 8](SPEC.md) for exactly what is and isn't caught).
 - **`agit ls`** — list imported sessions: start, duration, events, files touched.
 - **`agit show <id>`** — one-session summary: model, tools, token totals,
-  per-file diffstat.
+  per-file diffstat. `--by-model` splits it: what each model cost and how
+  many files its edits touched. Tokens are exact; file attribution credits
+  an edit to the model named by the nearest preceding event, and says so.
+- **`agit grep <pattern>`** — search every imported session at once:
+  "which session touched auth.py" (`--path`), "where did I run pytest"
+  (`--type tool.call`). Matches the same one-line rendering `replay
+  --timeline` prints, so what you search is what you saw, and outputs one
+  flat row per hit for piping onward.
 - **`agit verify <id>`** — validate the hash chain; reports the first broken
   link, and detects truncation via `meta.json`.
 - **`agit replay <id>`** — step through events (`n`/`p`/`g N`), inspect any
@@ -66,7 +79,13 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
   the task, last exchanges, file state) — not a transplant of the agent's
   mind. `fork.json` records the source session and fork-point hash, so
   provenance is checkable with `agit verify`.
-- **`agit merge <fork-dir>`** — bring a fork's files back: ordinary git
+- **`agit diff <a> <b>`** — what two sessions did differently: files each
+  side touched, which ones converged on identical content, which diverged
+  (with both hashes), and the work each spent getting there. `agit diff
+  <fork-dir>` compares a fork against the parent it came from, starting at
+  the fork point recorded in `fork.json`. Comparison is by reconstructed
+  content, so it inherits replay's blind spot and says so.
+- **`agit merge <fork-dir>` — bring a fork's files back: ordinary git
   three-way merge per file with the fork point as base (`git merge-file`
   does the merging). Trivial cases fast-forward, real conflicts get
   standard markers and a nonzero exit, and the merge — outcomes plus your
@@ -86,7 +105,9 @@ npm ci && npm run build && npm link   # `agit` is now on your PATH
   import — viewers can download `events.jsonl` and `agit verify` what they
   watched. If the sharing CLI dies, `agit share --resume <share-id>`
   reattaches to the same link and pushes only the missing tail. Links
-  expire (24h default) and sharing is opt-in per session, always.
+  expire (24h default) and sharing is opt-in per session, always. A stored
+  session whose chain does not verify is refused — `share`, `export`, `fork`
+  and `pr` all name the failing event rather than publishing it.
 - **`agit relay`** — the self-hosted relay behind `share`: in-memory only,
   loopback by default, nothing persisted. [PROTOCOL.md](PROTOCOL.md)
   documents the (v0, unstable) wire protocol.

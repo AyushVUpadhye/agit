@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { claudeCodeAdapter } from "../src/adapters/claude-code.js";
-import { buildChain } from "../src/format/hash.js";
+import { buildChain, sha256Hex } from "../src/format/hash.js";
 import type { AgitEvent } from "../src/format/events.js";
 import { writeFork } from "../src/fork.js";
 import { gitMergeFile, mergeFork } from "../src/merge.js";
@@ -149,5 +149,107 @@ describe("mergeFork", () => {
     fj.atHash = "0".repeat(64);
     writeFileSync(join(forkDir, "fork.json"), JSON.stringify(fj), "utf8");
     expect(() => mergeFork({ forkDir, intoDir, sourceEvents: DEMO })).toThrow(/does not match/);
+  });
+
+  it("merges interleaved edits across multiple files independently", () => {
+    const baseA = "a1\na2\na3\na4\na5\na6\na7\n";
+    const baseB = "b1\nb2\nb3\nb4\nb5\nb6\nb7\n";
+    const forkA = "a1\na2\nA3-fork\na4\na5\na6\na7-fork\n";
+    const forkB = "b1\nb2\nB3-fork\nb4\nb5\nb6\nb7-fork\n";
+    const oursA = "A1-ours\na2\na3\na4\na5\na6\na7\n";
+    const oursB = "B1-ours\nb2\nb3\nb4\nb5\nb6\nb7\n";
+
+    const drafts = [
+      {
+        ts: "2026-01-01T00:00:00.000Z",
+        type: "file.diff" as const,
+        payload: {
+          path: "src/a.ts",
+          kind: "create" as const,
+          diff: "--- /dev/null\n+++ b/src/a.ts\n@@ -0,0 +1,7 @@\n+a1\n+a2\n+a3\n+a4\n+a5\n+a6\n+a7\n",
+          beforeHash: null,
+          afterHash: sha256Hex(baseA),
+          toolUseId: "a-create",
+          source: "test",
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        type: "file.diff" as const,
+        payload: {
+          path: "src/b.ts",
+          kind: "create" as const,
+          diff: "--- /dev/null\n+++ b/src/b.ts\n@@ -0,0 +1,7 @@\n+b1\n+b2\n+b3\n+b4\n+b5\n+b6\n+b7\n",
+          beforeHash: null,
+          afterHash: sha256Hex(baseB),
+          toolUseId: "b-create",
+          source: "test",
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:02.000Z",
+        type: "file.diff" as const,
+        payload: {
+          path: "src/a.ts",
+          kind: "modify" as const,
+          diff: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,7 +1,7 @@\n a1\n a2\n-a3\n+A3-fork\n a4\n a5\n a6\n-a7\n+A7-fork\n",
+          beforeHash: sha256Hex(baseA),
+          afterHash: sha256Hex(forkA),
+          toolUseId: "a-edit",
+          source: "test",
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:03.000Z",
+        type: "file.diff" as const,
+        payload: {
+          path: "src/b.ts",
+          kind: "modify" as const,
+          diff: "--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1,7 +1,7 @@\n b1\n b2\n-b3\n+B3-fork\n b4\n b5\n b6\n-b7\n+B7-fork\n",
+          beforeHash: sha256Hex(baseB),
+          afterHash: sha256Hex(forkB),
+          toolUseId: "b-edit",
+          source: "test",
+        },
+      },
+    ];
+
+    const events = buildChain("merge-interleave", drafts);
+    const scratch = mkdtempSync(join(tmpdir(), "agit-merge-interleave-"));
+    const forkDir = join(scratch, "fork");
+    const intoDir = join(scratch, "target");
+
+    writeFork(events, 1, "merge-interleave", forkDir);
+
+    for (const rel of ["src/a.ts", "src/b.ts"]) {
+      const dest = join(intoDir, rel);
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, readFileSync(join(forkDir, "tree", rel), "utf8"), "utf8");
+    }
+
+    writeFileSync(join(forkDir, "tree", "src", "a.ts"), forkA, "utf8");
+    writeFileSync(join(forkDir, "tree", "src", "b.ts"), forkB, "utf8");
+
+    writeFileSync(join(intoDir, "src", "a.ts"), oursA, "utf8");
+    writeFileSync(join(intoDir, "src", "b.ts"), oursB, "utf8");
+
+    const { results, conflicts } = mergeFork({
+      forkDir,
+      intoDir,
+      sourceEvents: events,
+    });
+
+    const byRel = Object.fromEntries(results.map((r) => [r.rel, r.outcome]));
+
+    expect(conflicts).toBe(0);
+    expect(byRel["src/a.ts"]).toBe("clean-merge");
+    expect(byRel["src/b.ts"]).toBe("clean-merge");
+
+    expect(readFileSync(join(intoDir, "src", "a.ts"), "utf8")).toBe(
+      "A1-ours\na2\nA3-fork\na4\na5\na6\na7-fork\n",
+    );
+    expect(readFileSync(join(intoDir, "src", "b.ts"), "utf8")).toBe(
+      "B1-ours\nb2\nB3-fork\nb4\nb5\nb6\nb7-fork\n",
+    );
   });
 });

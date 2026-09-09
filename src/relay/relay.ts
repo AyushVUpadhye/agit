@@ -27,6 +27,7 @@ export interface RelayOptions {
   maxEventsPerShare?: number;
   defaultTtlMs?: number;
   maxTtlMs?: number;
+  trustedProxies?: string[];
 }
 
 interface Share {
@@ -79,6 +80,7 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
   const maxEvents = opts.maxEventsPerShare ?? 200_000;
   const defaultTtl = opts.defaultTtlMs ?? 24 * 3600_000;
   const maxTtl = opts.maxTtlMs ?? 7 * 24 * 3600_000;
+  const trustedProxies = new Set(opts.trustedProxies ?? []);
 
   const reaper = setInterval(() => {
     const now = Date.now();
@@ -213,7 +215,7 @@ export function startRelay(opts: RelayOptions = {}): Promise<RelayHandle> {
 
       if (verb === "message" && req.method === "POST") {
         const now = Date.now();
-        const sender = req.socket.remoteAddress ?? "unknown";
+        const sender = senderIdentity(req, trustedProxies);
         const recent = (share.msgTimes.get(sender) ?? []).filter((t) => now - t < 60_000);
         if (recent.length >= LIMITS.msgsPerMinute) {
           share.msgTimes.set(sender, recent);
@@ -341,6 +343,21 @@ function parseLastEventId(req: IncomingMessage): number {
   const raw = req.headers["last-event-id"];
   const n = Number(Array.isArray(raw) ? raw[0] : raw);
   return Number.isInteger(n) && n >= 0 ? n : -1;
+}
+
+function senderIdentity(req: IncomingMessage, trustedProxies: Set<string>): string {
+  const remote = req.socket.remoteAddress ?? "unknown";
+  if (!trustedProxies.has(remote)) return remote;
+
+  const raw = req.headers["x-forwarded-for"];
+  const forwarded = typeof raw === "string" ? raw.split(",").map((v) => v.trim()) : [];
+
+  for (let i = forwarded.length - 1; i >= 0; i--) {
+    const candidate = forwarded[i];
+    if (candidate && !trustedProxies.has(candidate)) return candidate;
+  }
+
+  return remote;
 }
 
 function authed(req: IncomingMessage, share: Share): boolean {
