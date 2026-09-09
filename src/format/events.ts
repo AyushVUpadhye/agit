@@ -1,6 +1,15 @@
-/** Core event types for the agit v1 format. See SPEC.md. */
+/** Core event types for the agit v2 format. See SPEC.md. */
 
-export const SCHEMA_VERSION = 1;
+/** Schema version this build writes. Readers accept every version in SUPPORTED_SCHEMA_VERSIONS. */
+export const SCHEMA_VERSION = 2;
+
+/**
+ * Every version a reader must accept. A v1 log is a v2 log that cannot
+ * contain `file.delete` — that is the whole difference — so logs written by
+ * earlier builds (stores, `pr` bundles, share downloads) keep verifying and
+ * keep working, unchanged and unrewritten.
+ */
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2];
 
 export const EVENT_TYPES = [
   "session.start",
@@ -10,6 +19,7 @@ export const EVENT_TYPES = [
   "tool.call",
   "tool.result",
   "file.diff",
+  "file.delete",
   "cost",
 ] as const;
 
@@ -49,4 +59,10 @@ export interface SessionMeta {
 
 export function isEventType(t: string): t is EventType {
   return (EVENT_TYPES as readonly string[]).includes(t);
+}
+
+/** The types a given schema version allows: v1 has everything but `file.delete`. */
+export function isEventTypeForVersion(t: string, v: number): boolean {
+  if (!isEventType(t)) return false;
+  return v >= 2 || t !== "file.delete";
 }

@@ -76,6 +76,16 @@ export function reconstructTree(events: AgitEvent[], at: number): TreeReconstruc
 
   for (const e of events) {
     if (e.seq > at) break;
+    if (e.type === "file.delete") {
+      const p = e.payload as { path?: Json };
+      if (typeof p.path === "string") {
+        content.delete(p.path);
+        broken.delete(p.path);
+        recovered.delete(p.path);
+      }
+      continue;
+    }
+
     if (e.type !== "file.diff") continue;
     const p = e.payload as DiffPayload;
     if (typeof p.path !== "string" || typeof p.afterHash !== "string" || typeof p.diff !== "string") continue;

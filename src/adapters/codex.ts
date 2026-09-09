@@ -42,7 +42,7 @@ import { applyUnifiedDiff } from "../patch.js";
 import type { Adapter, ConvertOptions, ConvertResult } from "./adapter.js";
 
 export const CODEX_ADAPTER_NAME = "codex";
-export const CODEX_ADAPTER_VERSION = "0.1.0";
+export const CODEX_ADAPTER_VERSION = "0.2.0";
 
 interface Envelope {
   timestamp?: string;
@@ -441,8 +441,28 @@ function emitFileDiffs(args: {
     }
 
     if (kind === "delete") {
+      // Codex records the file's content at deletion. That is the content
+      // actually removed, so it wins over agit's own reconstruction — and if
+      // the two differ, replay flags it through beforeHash, exactly as it
+      // does for a file.diff whose before contradicts the last known content.
+      const recorded = typeof c.content === "string" ? c.content : undefined;
+      const before = recorded ?? known.get(path);
+      if (before === undefined) {
+        skip("patch_apply:delete(content not recorded and not in log)");
+        continue;
+      }
+
+      body.push({
+        ts,
+        type: "file.delete",
+        payload: {
+          path,
+          beforeHash: sha256Utf8(before),
+          toolUseId: callId,
+          source: "apply_patch",
+        },
+      });
       known.delete(path);
-      skip("patch_apply:delete(no deletion event in SPEC)");
       continue;
     }
     skip(`patch_apply:${kind || "?"}`);

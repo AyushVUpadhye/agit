@@ -20,6 +20,8 @@ export interface FileState {
    * process). Undefined means "no contradiction observed", not "unchanged".
    */
   divergedAtSeq?: number;
+  /** Seq of the structured deletion that removed the file. A later edit of the same path clears it. */
+  deletedAtSeq?: number;
 }
 
 /** Fold file.diff events up to and including seq `at` (default: all). Lower bound on reality — SPEC §5.7. */
@@ -27,6 +29,28 @@ export function fileStateAt(events: AgitEvent[], at?: number): Map<string, FileS
   const files = new Map<string, FileState>();
   for (const e of events) {
     if (at !== undefined && e.seq > at) break;
+    if (e.type === "file.delete") {
+      const d = e.payload as { path?: Json; beforeHash?: Json };
+      if (typeof d.path !== "string") continue;
+      const prev = files.get(d.path);
+      // A deletion's beforeHash is a claim about the content that was removed;
+      // if it contradicts the last content we know, something edited the file
+      // outside structured edits first — the same proof file.diff gives.
+      const contradicted =
+        prev !== undefined && typeof d.beforeHash === "string" && d.beforeHash !== prev.afterHash;
+      files.set(d.path, {
+        path: d.path,
+        kind: prev?.kind ?? "modify",
+        afterHash: prev?.afterHash ?? "",
+        lastSeq: e.seq,
+        edits: (prev?.edits ?? 0) + 1,
+        added: prev?.added ?? 0,
+        removed: prev?.removed ?? 0,
+        divergedAtSeq: prev?.divergedAtSeq ?? (contradicted ? e.seq : undefined),
+        deletedAtSeq: e.seq,
+      });
+      continue;
+    }
     if (e.type !== "file.diff") continue;
     const p = e.payload as { path?: Json; kind?: Json; afterHash?: Json; beforeHash?: Json; diff?: Json };
     if (typeof p.path !== "string" || typeof p.afterHash !== "string") continue;
@@ -213,6 +237,8 @@ export function eventLine(e: AgitEvent): string {
       const { added, removed } = diffStat(str(p.diff));
       return `file.diff      ${str(p.kind)} ${str(p.path)} (+${added} -${removed})`;
     }
+    case "file.delete":
+      return `file.delete    ${str(p.path)}`;
     case "cost": {
       const u = (p.usage ?? {}) as { [k: string]: Json };
       return `cost           ${str(p.model)} in=${num(u.inputTokens)} out=${num(u.outputTokens)} cacheRead=${num(u.cacheReadInputTokens)}`;
