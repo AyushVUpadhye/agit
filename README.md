@@ -131,12 +131,15 @@ fall out of that chain.
 Said plainly:
 
 - **Two adapters, with different limits.** Claude Code is the reference;
-  Codex is mapped from its own structured edit records. OpenClaw is next.
+  Codex is mapped from its own structured edit records. OpenClaw is mapped from the `apply_patch` text it records, replayed
+  with OpenClaw's own matching rules.
 - **Codex updates have a verification window.** Codex records a file's full
   content when it *creates* one, but only a diff when it *updates* one — so
   agit can verify an update only while it already holds that file's content
   from earlier in the same session. An edit to a file that predates the
   session is skipped and counted, never hashed on a guess.
+- **OpenClaw has the same window**: `apply_patch` records the patch, not
+  the file, so an update is verifiable only for a file the session created.
 - **Codex renames are skipped** — no event type says so. Deletions are
   recorded (`file.delete`) whenever Codex logged the file's content.
 - **Codex reasoning arrives encrypted** and is dropped, counted.

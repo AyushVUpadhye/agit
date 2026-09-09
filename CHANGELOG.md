@@ -54,6 +54,13 @@ Notable changes to agit. The event format itself is versioned separately
 
 ### Added
 
+- **OpenClaw file edits** (#6, #52). The adapter now emits `file.diff` and
+  `file.delete` from the `apply_patch` text OpenClaw records, parsed with the
+  runtime's own grammar and applied with its own matching rules, so the
+  hashes are over the bytes the runtime wrote. Only files the tool's result
+  confirms are emitted; updates to files that predate the session, failed
+  patches, no-ops and unparseable input are skipped and counted. A rename is
+  recorded as a delete plus a create.
 - **`agit import --all` and `--latest`** (#60). Discovery of the supported
   runtimes' own log directories — Claude Code, Codex, OpenClaw — importing
   what is new and reporting what grew (`updated 22 → 40 events`). A

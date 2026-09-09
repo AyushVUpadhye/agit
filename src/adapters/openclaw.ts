@@ -5,7 +5,7 @@
  * preserve native ids under payload.native, skip and count what cannot be
  * mapped, never guess.
  *
- * Derived from OpenClaw'''s own type definitions rather than from a captured
+ * Derived from OpenClaw's own type definitions rather than from a captured
  * log, and each shape below was checked against them:
  *   - the header entry, src/config/sessions/transcript-header.ts:
  *       { type: "session", version, id, timestamp, cwd, parentSession? }
@@ -15,12 +15,23 @@
  *     toolCall, and Usage { input, output, cacheRead, cacheWrite, cost },
  *     packages/llm-core/src/types.ts
  *
- * Structured apply_patch calls can emit file.diff when the full file state
- * can be established from earlier edits in the same session. Updates whose
- * base content is unknown are skipped rather than guessed.
+ * File edits: OpenClaw's apply_patch tool takes one patch string ("*** Begin
+ * Patch" … "*** End Patch") and answers "Success. Updated the following
+ * files:" with A/M/D lines (src/agents/apply-patch.ts). openclaw-patch.ts
+ * parses that grammar and applies update hunks with OpenClaw's own matching
+ * rules, so the content agit hashes is the content the runtime wrote. Only
+ * files the result confirms are emitted: an add is a verified create; an
+ * update is a verified modify when the file's content is already in the log
+ * (created or updated earlier in the session); a delete is a file.delete
+ * carrying the content's hash; a rename is a delete plus a create. Updates
+ * to files that predate the session, failed patches, no-ops and unparseable
+ * input are skipped and counted, never guessed.
+ *
+ * Still to be exercised against a real OpenClaw transcript (#6): a real log
+ * that disagrees names its unmapped records in `agit import` output.
  */
 import { createHash } from "node:crypto";
-import { applyUnifiedDiff } from "../patch.js";
+import { applyUpdate, parseApplyPatch, type PatchHunk } from "./openclaw-patch.js";
 import type { DraftEvent, Json } from "../format/events.js";
 import type { Adapter, ConvertOptions, ConvertResult } from "./adapter.js";
 
@@ -47,21 +58,6 @@ function textContent(content: unknown): string {
 
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function toolResultText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-
-  for (const partValue of content) {
-    const part = asRecord(partValue);
-    if (!part) continue;
-
-    if (typeof part.text === "string") return part.text;
-    if (typeof part.content === "string") return part.content;
-  }
-
-  return "";
 }
 
 /**
@@ -120,155 +116,199 @@ function fileDiffPayload(
 type PendingPatch = {
   ts: string;
   toolUseId: string;
-  changes: Json;
+  input: string | null;
 };
 
-function emitOpenClawFileDiffs(
+type PatchSummary = { added: Set<string>; modified: Set<string>; deleted: Set<string> };
+
+/** What the runtime says it did: details.summary when the transcript kept it, else the result text's A/M/D lines. */
+function patchSummary(message: RecordValue): PatchSummary | null {
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const summary = asRecord(asRecord(message.details)?.summary);
+  if (summary) {
+    return {
+      added: new Set(list(summary.added)),
+      modified: new Set(list(summary.modified)),
+      deleted: new Set(list(summary.deleted)),
+    };
+  }
+  const lines = textContent(message.content).split("\n");
+  if (lines[0]?.trim() !== "Success. Updated the following files:") return null;
+  const out: PatchSummary = { added: new Set(), modified: new Set(), deleted: new Set() };
+  for (const l of lines.slice(1)) {
+    if (l.startsWith("A ")) out.added.add(l.slice(2));
+    else if (l.startsWith("M ")) out.modified.add(l.slice(2));
+    else if (l.startsWith("D ")) out.deleted.add(l.slice(2));
+  }
+  return out;
+}
+
+/** The runtime reports display paths; a hunk path matches one exactly or as a suffix either way. */
+function reported(set: Set<string>, path: string): boolean {
+  const norm = (x: string): string => x.replace(/\\/g, "/").replace(/^\.\//, "");
+  const p = norm(path);
+  for (const s of set) {
+    const q = norm(s);
+    if (q === p || q.endsWith("/" + p) || p.endsWith("/" + q)) return true;
+  }
+  return false;
+}
+
+/** Log paths are absolute and OS-native (SPEC section 5.7); patch paths are workspace-relative. */
+function absolutePath(cwd: string | undefined, p: string): string {
+  if (cwd === undefined || /^([A-Za-z]:[\\/]|[\\/])/.test(p)) return p;
+  const sep = cwd.includes("\\") ? "\\" : "/";
+  return cwd.replace(/[\\/]+$/, "") + sep + p.replace(/[\\/]/g, sep);
+}
+
+/** A whole-file unified diff: valid for replay to apply and verify, if not the tightest to read. */
+function synthesizeDiff(path: string, before: string | null, after: string): string {
+  const header = before === null ? `--- /dev/null\n+++ b/${path}` : `--- a/${path}\n+++ b/${path}`;
+  const split = (t: string): string[] => {
+    if (t === "") return [];
+    const lines = t.split("\n");
+    if (lines[lines.length - 1] === "") lines.pop();
+    return lines;
+  };
+  const b = before === null ? [] : split(before);
+  const a = split(after);
+  const lines = [...b.map((l) => `-${l}`), ...a.map((l) => `+${l}`)];
+  return `${header}\n@@ -${b.length === 0 ? 0 : 1},${b.length} +${a.length === 0 ? 0 : 1},${a.length} @@\n${lines.join("\n")}\n`;
+}
+
+function deletePayload(path: string, before: string, toolUseId: string): { [key: string]: Json } {
+  return { path, beforeHash: sha256Utf8(before), toolUseId, source: "apply_patch" };
+}
+
+/**
+ * Turn one confirmed apply_patch call into file events. `known` is the content
+ * agit can vouch for — files created or updated earlier in this session — and
+ * nothing is hashed that is not in it.
+ */
+function emitPatchEvents(
   pending: PendingPatch,
-  result: RecordValue,
+  message: RecordValue,
   body: DraftEvent[],
   known: Map<string, string>,
   skip: (reason: string) => void,
+  cwd: string | undefined,
 ): void {
-  if (result.isError === true) {
-    skip("apply_patch:error");
+  if (message.isError === true) {
+    // Some hunks may have landed before the failure; there is no way to tell which.
+    skip("apply_patch:failed(nothing attributed)");
     return;
   }
-
-  const resultText = toolResultText(result.content);
-  let resultObject: RecordValue | undefined;
-
+  if (pending.input === null) {
+    skip("apply_patch:no input");
+    return;
+  }
+  if (/^No changes made/.test(textContent(message.content))) {
+    skip("apply_patch:no-op");
+    return;
+  }
+  const summary = patchSummary(message);
+  if (summary === null) {
+    skip("apply_patch:unrecognized result");
+    return;
+  }
+  let hunks: PatchHunk[];
   try {
-    resultObject = asRecord(JSON.parse(resultText));
+    hunks = parseApplyPatch(pending.input);
   } catch {
-    skip("apply_patch:malformed-result");
+    skip("apply_patch:unparseable input");
     return;
   }
 
-  if (!resultObject) {
-    skip("apply_patch:malformed-result");
-    return;
-  }
+  for (const h of hunks) {
+    const path = absolutePath(cwd, h.path);
 
-  if (resultObject.status !== "completed") {
-    skip(`apply_patch:${String(resultObject.status ?? "not completed")}`);
-    return;
-  }
-
-  if (!Array.isArray(pending.changes)) {
-    skip("apply_patch:no changes");
-    return;
-  }
-
-  for (const changeValue of pending.changes) {
-    const change = asRecord(changeValue);
-
-    if (!change) {
-      skip("apply_patch:malformed change");
-      continue;
-    }
-
-    const path = typeof change.path === "string" ? change.path : "";
-    const kindRecord = asRecord(change.kind);
-    const kind =
-      kindRecord && typeof kindRecord.type === "string"
-        ? kindRecord.type
-        : "";
-
-    if (!path || !kind) {
-      skip("apply_patch:malformed change");
-      continue;
-    }
-
-    const diff = typeof change.diff === "string" ? change.diff : "";
-
-    if (kind === "add") {
-      if (!diff) {
-        skip("apply_patch:add(no content)");
+    if (h.kind === "add") {
+      if (!reported(summary.added, h.path)) {
+        skip("apply_patch:add(not confirmed by the result)");
         continue;
       }
-
       body.push({
         ts: pending.ts,
         type: "file.diff",
         payload: fileDiffPayload(
           path,
           null,
-          diff,
-          synthesizeCreateDiff(path, diff),
+          h.contents,
+          synthesizeDiff(path, null, h.contents),
           pending.toolUseId,
         ),
       });
-
-      known.set(path, diff);
+      known.set(path, h.contents);
       continue;
     }
 
-    if (kind === "update") {
-      if (!diff) {
-        skip("apply_patch:update(no diff)");
+    if (h.kind === "delete") {
+      if (!reported(summary.deleted, h.path)) {
+        skip("apply_patch:delete(not confirmed by the result)");
         continue;
       }
-
-      const movePath = kindRecord?.move_path;
-      if (typeof movePath === "string" && movePath !== "") {
-        skip("apply_patch:update(rename)");
-        continue;
-      }
-
       const before = known.get(path);
-
       if (before === undefined) {
-        skip("apply_patch:update(base content not in log)");
+        skip("apply_patch:delete(content not in log)");
         continue;
       }
+      body.push({
+        ts: pending.ts,
+        type: "file.delete",
+        payload: deletePayload(path, before, pending.toolUseId),
+      });
+      known.delete(path);
+      continue;
+    }
 
-      let after: string;
+    const before = known.get(path);
+    if (before === undefined) {
+      skip("apply_patch:update(base content not in log)");
+      continue;
+    }
+    let after: string;
+    try {
+      after = applyUpdate(before, h.chunks);
+    } catch {
+      skip("apply_patch:update(patch did not apply)");
+      continue;
+    }
 
-      try {
-        after = applyUnifiedDiff(before, diff);
-      } catch {
-        skip("apply_patch:update(diff did not apply)");
+    const dest = h.movePath === undefined ? path : absolutePath(cwd, h.movePath);
+    if (dest !== path) {
+      if (!reported(summary.modified, h.movePath!)) {
+        skip("apply_patch:rename(not confirmed by the result)");
         continue;
       }
-
+      // A rename is recorded as what the filesystem saw: the old path gone,
+      // the new one created with the updated content.
+      body.push({
+        ts: pending.ts,
+        type: "file.delete",
+        payload: deletePayload(path, before, pending.toolUseId),
+      });
       body.push({
         ts: pending.ts,
         type: "file.diff",
-        payload: fileDiffPayload(
-          path,
-          before,
-          after,
-          diff,
-          pending.toolUseId,
-        ),
+        payload: fileDiffPayload(dest, null, after, synthesizeDiff(dest, null, after), pending.toolUseId),
       });
-
-      known.set(path, after);
-      continue;
-    }
-
-    if (kind === "delete") {
       known.delete(path);
-      skip("apply_patch:delete(no deletion event in SPEC)");
+      known.set(dest, after);
       continue;
     }
 
-    skip(`apply_patch:${kind}`);
+    if (!reported(summary.modified, h.path)) {
+      skip("apply_patch:update(not confirmed by the result)");
+      continue;
+    }
+    body.push({
+      ts: pending.ts,
+      type: "file.diff",
+      payload: fileDiffPayload(path, before, after, synthesizeDiff(path, before, after), pending.toolUseId),
+    });
+    known.set(path, after);
   }
-}
-
-function synthesizeCreateDiff(path: string, content: string): string {
-  const lines = content.endsWith("\n")
-    ? content.slice(0, -1).split("\n")
-    : content.split("\n");
-
-  return (
-    `--- /dev/null\n+++ b/${path}\n` +
-    `@@ -0,0 +1,${lines.length} @@\n` +
-    lines.map((line) => `+${line}`).join("\n") +
-    "\n"
-  );
 }
 
 export const openclawAdapter: Adapter = {
@@ -424,7 +464,7 @@ export const openclawAdapter: Adapter = {
               pendingPatches.set(part.id, {
                 ts,
                 toolUseId: part.id,
-                changes: inputRecord?.changes ?? null,
+                input: typeof inputRecord?.input === "string" ? inputRecord.input : null,
               });
             }
 
@@ -482,13 +522,7 @@ export const openclawAdapter: Adapter = {
           const pending = pendingPatches.get(message.toolCallId);
 
           if (pending) {
-            emitOpenClawFileDiffs(
-              pending,
-              message,
-              drafts,
-              known,
-              skip,
-            );
+            emitPatchEvents(pending, message, drafts, known, skip, cwd);
             pendingPatches.delete(message.toolCallId);
           } else {
             skip("apply_patch:missing-call");

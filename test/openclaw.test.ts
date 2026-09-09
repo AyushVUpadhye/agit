@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { claudeCodeAdapter } from "../src/adapters/claude-code.js";
 import { codexAdapter } from "../src/adapters/codex.js";
-import { buildChain } from "../src/format/hash.js";
+import { createHash } from "node:crypto";
+import { buildChain, toJsonl } from "../src/format/hash.js";
+import { reconstructTree } from "../src/fork.js";
 import { timelineLines } from "../src/state.js";
 import { openclawAdapter } from "../src/adapters/openclaw.js";
 import type { DraftEvent, Json } from "../src/format/events.js";
@@ -193,248 +195,77 @@ describe("openclaw adapter", () => {
     });
     expect(res.drafts.map((d) => d.type)).toEqual(["session.start", "session.end"]);
   });
+});
 
-  it("maps OpenClaw apply_patch add and update to file.diff", () => {
-    const addContent = "hello from OpenClaw\n";
-    const updateDiff =
-      "@@ -1 +1 @@\n" +
-      "-hello from OpenClaw\n" +
-      "+hello from OpenClaw - edited\n";
+describe("apply_patch → file events (fixtures/openclaw/edits.jsonl)", () => {
+  const editLines = readFileSync(join(ROOT, "fixtures", "openclaw", "edits.jsonl"), "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+  const res = openclawAdapter.convert(editLines);
+  const events = buildChain(res.sessionId, res.drafts);
+  const fileEvents = res.drafts.filter((d) => d.type === "file.diff" || d.type === "file.delete");
+  const pay = (d: DraftEvent): { [k: string]: Json } => d.payload as { [k: string]: Json };
+  const sha = (s: string): string => createHash("sha256").update(s, "utf8").digest("hex");
 
-    const lines = [
-      JSON.stringify({
-        type: "session",
-        version: 1,
-        id: "openclaw-apply-patch",
-        timestamp: "2026-09-09T10:00:00.000Z",
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-1",
-        parentId: null,
-        timestamp: "2026-09-09T10:00:01.000Z",
-        message: {
-          role: "assistant",
-          model: "gpt-5.6-luna",
-          content: [{
-            type: "toolCall",
-            id: "patch-1",
-            name: "apply_patch",
-            arguments: {
-              changes: [{
-                path: "C:\\\\workspace\\\\test.txt",
-                kind: { type: "add" },
-                stat: { added: 1, removed: 0 },
-                diff: addContent,
-              }],
-            },
-          }],
-        },
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-2",
-        parentId: "msg-1",
-        timestamp: "2026-09-09T10:00:02.000Z",
-        message: {
-          role: "toolResult",
-          toolCallId: "patch-1",
-          toolName: "apply_patch",
-          isError: false,
-          content: [{
-            type: "toolResult",
-            text: JSON.stringify({
-              status: "completed",
-              changes: [{
-                path: "C:\\\\workspace\\\\test.txt",
-                kind: { type: "add" },
-              }],
-            }),
-          }],
-        },
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-3",
-        parentId: "msg-2",
-        timestamp: "2026-09-09T10:00:03.000Z",
-        message: {
-          role: "assistant",
-          model: "gpt-5.6-luna",
-          content: [{
-            type: "toolCall",
-            id: "patch-2",
-            name: "apply_patch",
-            arguments: {
-              changes: [{
-                path: "C:\\\\workspace\\\\test.txt",
-                kind: { type: "update", move_path: null },
-                stat: { added: 1, removed: 1 },
-                diff: updateDiff,
-              }],
-            },
-          }],
-        },
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-4",
-        parentId: "msg-3",
-        timestamp: "2026-09-09T10:00:04.000Z",
-        message: {
-          role: "toolResult",
-          toolCallId: "patch-2",
-          toolName: "apply_patch",
-          isError: false,
-          content: [{
-            type: "toolResult",
-            text: JSON.stringify({
-              status: "completed",
-              changes: [{
-                path: "C:\\\\workspace\\\\test.txt",
-                kind: { type: "update", move_path: null },
-              }],
-            }),
-          }],
-        },
-      }),
-    ];
-
-    const result = openclawAdapter.convert(lines);
-    const fileDiffs = result.drafts.filter((event) => event.type === "file.diff");
-
-    expect(fileDiffs).toHaveLength(2);
-
-    const create = payloadOf(fileDiffs, 0);
-    expect(create.kind).toBe("create");
-    expect(create.path).toBe("C:\\\\workspace\\\\test.txt");
-    expect(create.beforeHash).toBe(null);
-    expect(create.toolUseId).toBe("patch-1");
-    expect(create.source).toBe("apply_patch");
-    expect(String(create.diff)).toContain("--- /dev/null");
-    expect(String(create.diff)).toContain("hello from OpenClaw");
-
-    const modify = payloadOf(fileDiffs, 1);
-    expect(modify.kind).toBe("modify");
-    expect(modify.path).toBe("C:\\\\workspace\\\\test.txt");
-    expect(modify.toolUseId).toBe("patch-2");
-    expect(modify.source).toBe("apply_patch");
-    expect(modify.diff).toBe(updateDiff);
-    expect(modify.beforeHash).not.toBe(null);
-    expect(modify.afterHash).not.toBe(null);
-
-    const toolResultIndexes = result.drafts
-      .map((event, index) => ({ event, index }))
-      .filter(({ event }) => event.type === "tool.result");
-
-    const fileDiffIndexes = result.drafts
-      .map((event, index) => ({ event, index }))
-      .filter(({ event }) => event.type === "file.diff");
-
-    expect(fileDiffIndexes[0]!.index).toBe(toolResultIndexes[0]!.index + 1);
-    expect(fileDiffIndexes[1]!.index).toBe(toolResultIndexes[1]!.index + 1);
+  it("maps add, update, EOF append, delete, rename and a multi-file patch, in patch order", () => {
+    expect(fileEvents.map((d) => [d.type, pay(d).kind ?? "delete", pay(d).path])).toEqual([
+      ["file.diff", "create", "/workspace/demo/hello.py"],
+      ["file.diff", "modify", "/workspace/demo/hello.py"],
+      ["file.diff", "create", "/workspace/demo/notes.md"],
+      ["file.diff", "modify", "/workspace/demo/notes.md"],
+      ["file.delete", "delete", "/workspace/demo/hello.py"],
+      ["file.delete", "delete", "/workspace/demo/notes.md"],
+      ["file.diff", "create", "/workspace/demo/docs/notes.md"],
+      ["file.diff", "create", "/workspace/demo/z.py"],
+      ["file.diff", "create", "/workspace/demo/a.py"],
+    ]);
   });
 
-  it("skips OpenClaw apply_patch update when base content is unknown", () => {
-    const lines = [
-      JSON.stringify({
-        type: "session",
-        version: 1,
-        id: "openclaw-unknown-base",
-        timestamp: "2026-09-09T10:00:00.000Z",
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-1",
-        timestamp: "2026-09-09T10:00:01.000Z",
-        message: {
-          role: "assistant",
-          content: [{
-            type: "toolCall",
-            id: "patch-unknown",
-            name: "apply_patch",
-            arguments: {
-              changes: [{
-                path: "C:\\\\workspace\\\\unknown.txt",
-                kind: { type: "update", move_path: null },
-                diff: "@@ -1 +1 @@\n-old\n+new\n",
-              }],
-            },
-          }],
-        },
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-2",
-        timestamp: "2026-09-09T10:00:02.000Z",
-        message: {
-          role: "toolResult",
-          toolCallId: "patch-unknown",
-          toolName: "apply_patch",
-          isError: false,
-          content: [{
-            type: "toolResult",
-            text: JSON.stringify({ status: "completed" }),
-          }],
-        },
-      }),
-    ];
-
-    const result = openclawAdapter.convert(lines);
-
-    expect(result.drafts.filter((event) => event.type === "file.diff")).toHaveLength(0);
-    expect(result.skipped["apply_patch:update(base content not in log)"]).toBe(1);
+  it("hashes exactly the bytes OpenClaw wrote, update rules included", () => {
+    const [create, modify, , eofAppend, , , renamed] = fileEvents;
+    expect(pay(create!).afterHash).toBe(sha("def hello():\n    print('hi')\n"));
+    expect(pay(modify!).beforeHash).toBe(sha("def hello():\n    print('hi')\n"));
+    expect(pay(modify!).afterHash).toBe(sha("def hello():\n    print('hello, world')\n"));
+    expect(pay(eofAppend!).afterHash).toBe(sha("# notes\n\n- shipped\n- tested\n"));
+    expect(pay(renamed!).afterHash).toBe(sha("# Notes\n\n- shipped\n- tested\n"));
+    expect(pay(fileEvents[5]!).beforeHash).toBe(sha("# notes\n\n- shipped\n- tested\n"));
   });
 
-  it("does not emit OpenClaw file.diff for failed apply_patch", () => {
-    const lines = [
-      JSON.stringify({
-        type: "session",
-        version: 1,
-        id: "openclaw-failed-patch",
-        timestamp: "2026-09-09T10:00:00.000Z",
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-1",
-        timestamp: "2026-09-09T10:00:01.000Z",
-        message: {
-          role: "assistant",
-          content: [{
-            type: "toolCall",
-            id: "patch-failed",
-            name: "apply_patch",
-            arguments: {
-              changes: [{
-                path: "C:\\\\workspace\\\\test.txt",
-                kind: { type: "add" },
-                diff: "hello\n",
-              }],
-            },
-          }],
-        },
-      }),
-      JSON.stringify({
-        type: "message",
-        id: "msg-2",
-        timestamp: "2026-09-09T10:00:02.000Z",
-        message: {
-          role: "toolResult",
-          toolCallId: "patch-failed",
-          toolName: "apply_patch",
-          isError: true,
-          content: [{
-            type: "toolResult",
-            text: JSON.stringify({ status: "failed" }),
-          }],
-        },
-      }),
-    ];
-
-    const result = openclawAdapter.convert(lines);
-
-    expect(result.drafts.filter((event) => event.type === "file.diff")).toHaveLength(0);
-    expect(result.skipped["apply_patch:error"]).toBe(1);
+  it("skips what it cannot vouch for, and says which", () => {
+    expect(res.skipped).toMatchObject({
+      "apply_patch:update(base content not in log)": 1, // existing.py predates the session
+      "apply_patch:failed(nothing attributed)": 1,
+      "apply_patch:no-op": 1,
+      "apply_patch:unparseable input": 1,
+    });
   });
 
+  it("every file event follows the tool.result that confirmed it", () => {
+    for (const [i, d] of res.drafts.entries()) {
+      if (d.type !== "file.diff" && d.type !== "file.delete") continue;
+      const before = res.drafts
+        .slice(0, i)
+        .reverse()
+        .find((x) => x.type === "tool.result")!;
+      expect(pay(before).toolUseId).toBe(pay(d).toolUseId);
+    }
+  });
+
+  it("the reconstructed tree is what the session left behind", () => {
+    const { files, skipped } = reconstructTree(events, events.length - 1);
+    expect(skipped).toEqual([]);
+    expect(files.map((f) => f.path).sort()).toEqual([
+      "/workspace/demo/a.py",
+      "/workspace/demo/docs/notes.md",
+      "/workspace/demo/z.py",
+    ]);
+    expect(files.find((f) => f.path.endsWith("docs/notes.md"))!.content).toBe(
+      "# Notes\n\n- shipped\n- tested\n",
+    );
+  });
+
+  it("imports byte-identically", () => {
+    const again = openclawAdapter.convert(editLines);
+    expect(toJsonl(buildChain(again.sessionId, again.drafts))).toBe(toJsonl(events));
+  });
 });
