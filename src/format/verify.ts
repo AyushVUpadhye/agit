@@ -1,5 +1,11 @@
 import { eventHash } from "./hash.js";
-import { isEventType, SCHEMA_VERSION, type AgitEvent, type SessionMeta } from "./events.js";
+import {
+  isEventType,
+  isEventTypeForVersion,
+  SUPPORTED_SCHEMA_VERSIONS,
+  type AgitEvent,
+  type SessionMeta,
+} from "./events.js";
 
 export interface VerifyResult {
   ok: boolean;
@@ -43,9 +49,18 @@ export function verifyChain(
       return broken(count, i, "line is not a JSON object");
     }
     const e = parsed as AgitEvent;
-    if (e.v !== SCHEMA_VERSION) return broken(count, i, `unknown schema version ${e.v}`);
+    if (typeof e.v !== "number" || !SUPPORTED_SCHEMA_VERSIONS.includes(e.v)) {
+      return broken(count, i, `unknown schema version ${e.v}`);
+    }
     if (typeof e.type !== "string" || !isEventType(e.type))
       return broken(count, i, `unknown event type ${JSON.stringify(e.type)}`);
+    if (!isEventTypeForVersion(e.type, e.v)) {
+      return broken(
+        count,
+        i,
+        `event type ${JSON.stringify(e.type)} requires schema v2; this event is v${e.v}`,
+      );
+    }
     if (e.seq !== count) return broken(count, i, `seq ${e.seq}, expected ${count}`);
     if (e.prev !== prev) return broken(count, i, "prev does not match previous event's hash");
     const recomputed = eventHash(e);

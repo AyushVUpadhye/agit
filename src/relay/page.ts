@@ -127,7 +127,7 @@ function oneLine(s, max) {
 }
 function chipClass(t) {
   return { "message.user": "user", "message.assistant": "assistant", "tool.call": "toolcall",
-           "tool.result": "toolresult", "file.diff": "filediff", "cost": "cost" }[t] || "";
+           "tool.result": "toolresult", "file.diff": "filediff", "file.delete": "filediff", "cost": "cost" }[t] || "";
 }
 function summary(e) {
   var p = e.payload || {};
@@ -149,6 +149,7 @@ function summary(e) {
     }
     case "tool.result": return (p.isError ? "ERROR " : "") + oneLine(str(p.output), 150);
     case "file.diff": return str(p.kind) + " " + str(p.path);
+    case "file.delete": return "delete " + str(p.path);
     case "cost": {
       var u = p.usage || {};
       return str(p.model) + "  in=" + (u.inputTokens || 0) + " out=" + (u.outputTokens || 0);
@@ -169,7 +170,7 @@ function addEvent(e) {
   row.appendChild(el("span", "sum", summary(e)));
   row.onclick = function () { select(e.seq); };
   timeline.appendChild(row);
-  if (e.type === "file.diff") foldFile(e);
+  if (e.type === "file.diff" || e.type === "file.delete") foldFile(e);
   if (e.type === "cost") foldCost(e);
   if ($("follow").checked) timeline.scrollTop = timeline.scrollHeight;
 }
@@ -182,13 +183,14 @@ function foldFile(e) {
     else if (l.charAt(0) === "-" && l.slice(0, 3) !== "---") del++;
   });
   var f = files[p.path] || { added: 0, removed: 0, edits: 0, kind: p.kind };
-  f.added += add; f.removed += del; f.edits++;
+  if (e.type === "file.delete") { f.kind = "delete"; f.edits++; }
+  else { f.added += add; f.removed += del; f.edits++; if (f.kind === "delete") f.kind = p.kind || "modify"; }
   files[p.path] = f;
   var list = $("flist"); list.textContent = ""; list.classList.remove("dim");
   Object.keys(files).forEach(function (path) {
     var x = files[path];
     var row = el("div", "f", "");
-    row.appendChild(el("span", x.kind === "create" ? "plus" : "", (x.kind === "create" ? "A " : "M ")));
+    row.appendChild(el("span", x.kind === "create" ? "plus" : "", (x.kind === "create" ? "A " : x.kind === "delete" ? "D " : "M ")));
     row.appendChild(el("span", "", path + "  "));
     row.appendChild(el("span", "plus", "+" + x.added + " "));
     row.appendChild(el("span", "minus", "-" + x.removed));

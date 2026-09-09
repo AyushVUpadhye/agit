@@ -118,9 +118,10 @@ to a relay — one you run.
 
 ## The format
 
-[SPEC.md](SPEC.md) is the most important artifact in this repo. Eight event
+[SPEC.md](SPEC.md) is the most important artifact in this repo. Nine event
 types (`session.start`, `session.end`, `message.user`, `message.assistant`,
-`tool.call`, `tool.result`, `file.diff`, `cost`), each carrying a canonical
+`tool.call`, `tool.result`, `file.diff`, `file.delete`, `cost`), each
+carrying a canonical
 SHA-256 hash and the hash of the previous event. Tamper-evidence, stable fork
 points, and independent verification of what an agent claims it did — all
 fall out of that chain.
@@ -136,14 +137,16 @@ Said plainly:
   agit can verify an update only while it already holds that file's content
   from earlier in the same session. An edit to a file that predates the
   session is skipped and counted, never hashed on a guess.
-- **Codex deletions and renames are skipped** — no event type says either.
+- **Codex renames are skipped** — no event type says so. Deletions are
+  recorded (`file.delete`) whenever Codex logged the file's content.
 - **Codex reasoning arrives encrypted** and is dropped, counted.
 - **`file.diff` coverage is partial.** Diffs come from structured edit tools
   (`Edit`/`Write`). Files changed through shell commands leave no diff event;
   file state from replay is a lower bound on what changed. Fork trees
   inherit this blind spot: a file the log never structurally edited is
-  absent from the tree entirely, and — since there are no deletion events —
-  a file deleted mid-session still appears at its last logged content.
+  absent from the tree entirely, and a file deleted by a shell command
+  still appears at its last logged content — only a structured deletion
+  (`file.delete`) removes it.
 - **No message injection into a running session.** Sharing is watch-only:
   viewer messages reach the sharing human's terminal, clearly attributed —
   they are never fed to the agent. Claude Code has no supported way to

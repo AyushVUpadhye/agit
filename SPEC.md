@@ -48,6 +48,12 @@ rely on it: it is source data, and clocks are what they are.
 Readers MUST reject a v2 event whose `type` is not listed in §5, and MUST
 ignore unknown fields inside `payload` (forward compatibility lives there).
 
+Readers MUST also accept schema version `1`. A v1 log is identical to v2
+except that `file.delete` (§5.8) does not exist in it, so a v1 event of that
+type MUST be rejected. Writers MUST write `2`. Existing v1 logs — stores,
+`pr` bundles, share downloads — keep verifying unchanged: their hashes were
+computed over `v: 1` and still recompute.
+
 ## 3. Canonical serialization
 
 The canonical form of a JSON value, used only for hashing:

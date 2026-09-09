@@ -11,7 +11,12 @@ import { openclawAdapter } from "./adapters/openclaw.js";
 import type { Adapter } from "./adapters/adapter.js";
 import { buildChain, sha256Hex, toJsonl } from "./format/hash.js";
 import { verifyChain } from "./format/verify.js";
-import { SCHEMA_VERSION, type AgitEvent, type SessionMeta } from "./format/events.js";
+import {
+  SCHEMA_VERSION,
+  SUPPORTED_SCHEMA_VERSIONS,
+  type AgitEvent,
+  type SessionMeta,
+} from "./format/events.js";
 import { writeFork } from "./fork.js";
 import { renderSessionHtml } from "./html.js";
 import { diffSessions, renderDiff, treeOnDisk } from "./diff.js";
@@ -253,7 +258,8 @@ function looksLikeAgitLog(lines: string[]): boolean {
   if (o === null || typeof o !== "object" || Array.isArray(o)) return false;
   const e = o as Record<string, unknown>;
   return (
-    e.v === SCHEMA_VERSION &&
+    typeof e.v === "number" &&
+    SUPPORTED_SCHEMA_VERSIONS.includes(e.v) &&
     e.seq === 0 &&
     typeof e.session === "string" &&
     typeof e.hash === "string" &&
@@ -333,7 +339,7 @@ function importNativeLog(
     : null;
 
   const meta: SessionMeta = {
-    agitSchema: 1,
+    agitSchema: SCHEMA_VERSION,
     sessionId: converted.sessionId,
     adapter: { name: adapter.name, version: adapter.version },
     importedAt: new Date().toISOString(),
@@ -732,7 +738,7 @@ function cmdShow(opts: Opts): number {
           ? `  [DIVERGED at seq ${f.divergedAtSeq}: content changed outside structured edits]`
           : "";
       console.log(
-        `    ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed}, ${f.edits} edit${f.edits === 1 ? "" : "s"})${diverged}`,
+        `    ${f.deletedAtSeq !== undefined ? "D" : f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed}, ${f.edits} edit${f.edits === 1 ? "" : "s"})${f.deletedAtSeq !== undefined ? ` [deleted at seq ${f.deletedAtSeq}]` : ""}${diverged}`,
       );
     }
   }
@@ -1514,7 +1520,7 @@ function printStateAt(events: AgitEvent[], seq: number): void {
           ? `  [DIVERGED at seq ${f.divergedAtSeq}]`
           : "";
       console.log(
-        `  ${f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed})  content sha256 ${f.afterHash.slice(0, 12)} @ seq ${f.lastSeq}${diverged}`,
+        `  ${f.deletedAtSeq !== undefined ? "D" : f.kind === "create" ? "A" : "M"} ${f.path}  (+${f.added} -${f.removed})  ${f.deletedAtSeq !== undefined ? "no content" : `content sha256 ${f.afterHash.slice(0, 12)}`} @ seq ${f.lastSeq}${f.deletedAtSeq !== undefined ? ` [deleted at seq ${f.deletedAtSeq}]` : ""}${diverged}`,
       );
     }
     console.log(

@@ -5,6 +5,18 @@ Notable changes to agit. The event format itself is versioned separately
 
 ## Unreleased
 
+### Changed
+
+- **Schema v2: `file.delete`** (#30, #51). A ninth event type records a
+  structured deletion with the SHA-256 of the content removed, so `fork` and
+  `diff` no longer write a deleted file back, `replay --state` and `show`
+  mark it `D`, and `grep --path` finds it. The Codex adapter emits it from
+  `apply_patch` deletions, preferring the content Codex recorded at deletion
+  over agit's own reconstruction. **Every existing v1 log keeps working**:
+  readers accept v1 and v2, a v1 log simply cannot contain `file.delete`,
+  and nothing is rewritten — v1 hashes still recompute. New logs are
+  written as v2.
+
 ### Fixed
 
 - **`share` and `export` no longer publish a chain that does not verify**
