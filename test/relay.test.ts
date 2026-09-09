@@ -117,6 +117,50 @@ describe("relay protocol v0", () => {
     await endShare(base, share);
   });
 
+  it("sheds a viewer whose outbound SSE buffer exceeds the backpressure bound", async () => {
+    const share = await createShare(base);
+
+    const url = new URL(`/api/shares/${share.shareId}/stream`, base);
+    const viewerClosed = new Promise<void>((resolve) => {
+      const req = httpRequest(
+        {
+          hostname: url.hostname,
+          port: url.port,
+          path: url.pathname,
+          headers: { accept: "text/event-stream" },
+        },
+        (res) => {
+          res.pause();
+          res.on("close", () => resolve());
+        },
+      );
+      req.on("error", () => resolve());
+      req.end();
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const session = `backpressure-${Date.now()}`;
+    const payload = "x".repeat(16 * 1024);
+    const drafts = Array.from({ length: 600 }, (_, i) => ({
+      type: "message.assistant" as const,
+      ts: new Date(i).toISOString(),
+      payload: { text: payload },
+    }));
+    const events = buildChain(session, drafts);
+
+    await pushEvents(base, share, events);
+
+    await expect(
+      Promise.race([
+        viewerClosed.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 3000)),
+      ]),
+    ).resolves.toBe(true);
+
+    await endShare(base, share);
+  });
+
   it("delivers viewer messages to the writer inbox and caps their size", async () => {
     const share = await createShare(base);
     const got: { name: string; text: string }[] = [];
@@ -180,6 +224,83 @@ describe("relay protocol v0", () => {
     await endShare(base, share);
   });
 
+  it("ignores X-Forwarded-For from untrusted senders", async () => {
+    const share = await createShare(base);
+
+    const send = (forwarded: string, text: string) =>
+      postMessage(base, share.shareId, "127.0.0.1", text, forwarded);
+
+    for (let i = 0; i < 30; i++) {
+      const res = await send("10.0.0.1", `spam ${i}`);
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await send("10.0.0.2", "spoofed");
+    expect(blocked.status).toBe(429);
+
+    await endShare(base, share);
+  });
+
+  it("uses X-Forwarded-For when the immediate sender is a trusted proxy", async () => {
+    const proxyRelay = await startRelay({
+      port: 0,
+      trustedProxies: ["127.0.0.1"],
+    });
+    const proxyBase = `http://127.0.0.1:${proxyRelay.port}`;
+
+    try {
+      const share = await createShare(proxyBase);
+      const send = (forwarded: string, text: string) =>
+        postMessage(proxyBase, share.shareId, "127.0.0.1", text, forwarded);
+
+      for (let i = 0; i < 30; i++) {
+        const res = await send("10.0.0.1", `client one ${i}`);
+        expect(res.status).toBe(200);
+      }
+
+      const clientOneBlocked = await send("10.0.0.1", "one too many");
+      expect(clientOneBlocked.status).toBe(429);
+
+      // A different forwarded client gets its own rate-limit bucket.
+      const clientTwo = await send("10.0.0.2", "client two");
+      expect(clientTwo.status).toBe(200);
+
+      await endShare(proxyBase, share);
+    } finally {
+      await proxyRelay.close();
+    }
+  });
+
+  it("walks trusted proxy hops right-to-left", async () => {
+    const proxyRelay = await startRelay({
+      port: 0,
+      trustedProxies: ["127.0.0.1", "192.168.1.10"],
+    });
+    const proxyBase = `http://127.0.0.1:${proxyRelay.port}`;
+
+    try {
+      const share = await createShare(proxyBase);
+      const send = (forwarded: string, text: string) =>
+        postMessage(proxyBase, share.shareId, "127.0.0.1", text, forwarded);
+
+      const chain = "10.0.0.1, 192.168.1.10";
+
+      for (let i = 0; i < 30; i++) {
+        const res = await send(chain, `client one ${i}`);
+        expect(res.status).toBe(200);
+      }
+
+      expect((await send(chain, "one too many")).status).toBe(429);
+
+      const other = await send("10.0.0.2, 192.168.1.10", "client two");
+      expect(other.status).toBe(200);
+
+      await endShare(proxyBase, share);
+    } finally {
+      await proxyRelay.close();
+    }
+  });
+
   it("an unreachable relay yields an actionable first-run message", async () => {
     await expect(createShare("http://127.0.0.1:1")).rejects.toThrow(/agit relay/);
   });
@@ -211,6 +332,7 @@ function postMessage(
   shareId: string,
   localAddress: string,
   text: string,
+  forwardedFor?: string,
 ): Promise<{ status: number }> {
   const url = new URL(`/api/shares/${shareId}/message`, base);
   const body = JSON.stringify({ name: "n", text });
@@ -222,7 +344,11 @@ function postMessage(
         path: url.pathname,
         method: "POST",
         localAddress,
-        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+          ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
+        },
       },
       (res) => {
         res.resume();
