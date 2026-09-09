@@ -319,6 +319,15 @@ function adoptBundle(opts: Opts, path: string, raw: string): number {
 
   const first = JSON.parse(lines[0]!) as AgitEvent;
   const id = first.session;
+  for (let i = 1; i < res.events; i++) {
+    const event = JSON.parse(lines[i]!) as AgitEvent;
+    if (event.session !== id) {
+      console.error(
+        `refusing to adopt: mixed session ids (event ${event.seq} belongs to ${event.session}, expected ${id})`,
+      );
+      return 1;
+    }
+  }
   try {
     assertSafeSessionId(id);
   } catch (err) {
@@ -334,7 +343,7 @@ function adoptBundle(opts: Opts, path: string, raw: string): number {
   if (listSessionIds(opts.dir).includes(id)) {
     // Re-adopting the same bundle is a no-op; a different log under the same
     // id is someone else's session and is never overwritten.
-    const existing = readSessionLines(opts.dir, id).join("\n") + "\n";
+    const existing = readFileSync(join(sessionDir(opts.dir, id), "events.jsonl"), "utf8");
     if (existing === jsonl) {
       console.log(`already adopted ${id} (identical log; nothing to do)`);
       return 0;

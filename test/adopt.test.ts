@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { buildChain, eventHash, toJsonl } from "../src/format/hash.js";
+import type { DraftEvent } from "../src/format/events.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLI = join(ROOT, "dist", "cli.js");
@@ -55,6 +57,33 @@ describe("adopting an agit bundle (agit import <bundle>)", () => {
     // Redaction is the origin's, and the output must not imply otherwise.
     expect(r.out).toContain("applied at the origin; agit did not re-scan");
     expect(existsSync(join(store, ".agit", "sessions", "demo-ratelimit-0001", "events.jsonl"))).toBe(true);
+  });
+
+  it("creates a portable handoff bundle through the pr CLI", () => {
+    const store = freshStore();
+    const out = join(mkdtempSync(join(tmpdir(), "agit-pr-e2e-")), "bundle");
+
+    const imported = agit(["import", FIXTURE, "--dir", store]);
+    expect(imported.code).toBe(0);
+
+    const pr = agit(["pr", "demo", "--out", out, "--dir", store]);
+
+    expect(pr.code).toBe(0);
+    expect(pr.out).toContain("handoff bundle for demo-ratelimit-0001 at event 30");
+    expect(pr.out).toContain("events.jsonl");
+    expect(pr.out).toContain("tree/");
+    expect(pr.out).toContain("SEED.md");
+    expect(pr.out).toContain("fork.json");
+
+    expect(existsSync(join(out, "events.jsonl"))).toBe(true);
+    expect(existsSync(join(out, "meta.json"))).toBe(true);
+    expect(existsSync(join(out, "tree"))).toBe(true);
+    expect(existsSync(join(out, "SEED.md"))).toBe(true);
+    expect(existsSync(join(out, "fork.json"))).toBe(true);
+
+    const verified = agit(["verify", join(out, "events.jsonl")]);
+    expect(verified.code).toBe(0);
+    expect(verified.out).toContain("chain intact");
   });
 
   it("stores the log byte for byte, so the origin's hashes still verify", () => {
@@ -181,6 +210,57 @@ describe("adopting an agit bundle (agit import <bundle>)", () => {
     const r = agit(["import", dir, "--dir", freshStore()]);
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/meta\.json says session/);
+  });
+
+  it("refuses a hash-valid log containing mixed session ids", () => {
+    const drafts: DraftEvent[] = [
+      { ts: "2026-01-01T00:00:00.000Z", type: "session.start", payload: { runtime: "test" } },
+      { ts: "2026-01-01T00:00:01.000Z", type: "message.user", payload: { text: "hello" } },
+      { ts: "2026-01-01T00:00:02.000Z", type: "session.end", payload: { reason: "test" } },
+    ];
+
+    const events = buildChain("session-a", drafts);
+
+    // Change a later event's session and recompute its hash. Since this
+    // changes the hash, also rebuild the following prev/hash link.
+    events[1]!.session = "session-b";
+    events[1]!.hash = eventHash(events[1]!);
+    events[2]!.prev = events[1]!.hash;
+    events[2]!.hash = eventHash(events[2]!);
+
+    const dir = mkdtempSync(join(tmpdir(), "agit-adopt-mixed-session-"));
+    const eventsPath = join(dir, "events.jsonl");
+    writeFileSync(eventsPath, toJsonl(events), "utf8");
+
+    const r = agit(["import", eventsPath, "--dir", freshStore()]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("mixed session ids");
+  });
+
+  it("re-adopting a bundle without a final newline is a no-op", () => {
+    const dir = bundleCopy();
+    const eventsPath = join(dir, "events.jsonl");
+
+    const raw = readFileSync(eventsPath, "utf8");
+    expect(raw.endsWith("\n")).toBe(true);
+
+    const withoutFinalNewline = raw.slice(0, -1);
+    writeFileSync(eventsPath, withoutFinalNewline, "utf8");
+
+    const store = freshStore();
+
+    const first = agit(["import", dir, "--dir", store]);
+    expect(first.code).toBe(0);
+
+    const storedPath = join(store, ".agit", "sessions", "demo-ratelimit-0001", "events.jsonl");
+
+    expect(readFileSync(storedPath, "utf8")).toBe(withoutFinalNewline);
+
+    const second = agit(["import", dir, "--dir", store]);
+    expect(second.code).toBe(0);
+    expect(second.out).toContain("already adopted");
+
+    expect(readFileSync(storedPath, "utf8")).toBe(withoutFinalNewline);
   });
 
   it("a directory without events.jsonl is reported, not guessed at", () => {
