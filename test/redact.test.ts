@@ -126,6 +126,35 @@ describe("redaction (SPEC §8)", () => {
     expect(counts).toEqual({ "slack-token": 1, "aws-access-key-id": 1 });
   });
 
+  it("redactDeep handles a payload nested far deeper than the call stack allows", () => {
+    // Regression for a real bug: session logs are untrusted input and
+    // JSON.parse places no limit on nesting depth, so the previous recursive
+    // implementation stack-overflowed on ordinary (not even adversarial)
+    // deeply-nested structured tool output well under 2,000 levels deep.
+    let deep: unknown = "leaf";
+    for (let i = 0; i < 50_000; i++) deep = [deep];
+    const counts: RedactionCounts = {};
+    expect(() => redactDeep(deep as Parameters<typeof redactDeep>[0], counts)).not.toThrow();
+    let unwrapped = redactDeep(deep as Parameters<typeof redactDeep>[0], counts);
+    let depth = 0;
+    while (Array.isArray(unwrapped)) {
+      unwrapped = unwrapped[0] as typeof unwrapped;
+      depth++;
+    }
+    expect(depth).toBe(50_000);
+    expect(unwrapped).toBe("leaf");
+  });
+
+  it("redactDeep drops undefined object properties but preserves undefined array elements", () => {
+    // Matches the pre-existing (recursive) implementation's documented
+    // behavior exactly — this is a refactor to an iterative walk, not a
+    // behavior change.
+    const counts: RedactionCounts = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately off-spec input, same as JS callers can pass
+    const input: any = { a: undefined, b: 1, c: [undefined, 2] };
+    expect(redactDeep(input, counts)).toEqual({ b: 1, c: [undefined, 2] });
+  });
+
   it("assignment does not catastrophically backtrack on a long ordinary string", () => {
     // Regression for a real bug: the earlier `(?:[A-Za-z0-9]+[_-])*` prefix
     // had an unbounded inner `+` that backtracked the full remaining length

@@ -90,12 +90,81 @@ export function redactString(s: string, counts: RedactionCounts): string {
   return out;
 }
 
-/** Recursively redact every string in a JSON value. Values only — object keys are payload structure, not data. */
-export function redactDeep<T extends Json>(value: T, counts: RedactionCounts): T {
-  if (typeof value === "string") return redactString(value, counts) as T;
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((v) => redactDeep(v, counts)) as T;
-  const out: { [key: string]: Json } = {};
-  for (const [k, v] of Object.entries(value)) out[k] = redactDeep(v, counts);
+type Frame =
+  | { kind: "array"; src: Json[]; container: Json[]; keys: number[]; i: number }
+  | {
+      kind: "object";
+      src: { [key: string]: Json };
+      container: { [key: string]: Json };
+      keys: string[];
+      i: number;
+    };
+
+function makeFrame(src: Json, container: Json): Frame {
+  if (Array.isArray(src)) {
+    return { kind: "array", src, container: container as Json[], keys: src.map((_, i) => i), i: 0 };
+  }
+  const obj = src as { [key: string]: Json };
+  return {
+    kind: "object",
+    src: obj,
+    container: container as { [key: string]: Json },
+    keys: Object.keys(obj),
+    i: 0,
+  };
+}
+
+/**
+ * Recursively redact every string in a JSON value. Values only — object keys
+ * are payload structure, not data.
+ *
+ * Iterative, with an explicit work stack, rather than a recursive walk: a
+ * session log is untrusted input and `JSON.parse` places no limit on nesting
+ * depth, so a recursive version stack-overflows on a payload nested a few
+ * thousand levels deep — reachable from ordinary (not even adversarial)
+ * structured tool output, well before any realistic size limit kicks in.
+ */
+export function redactDeep<T extends Json>(root: T, counts: RedactionCounts): T {
+  if (typeof root === "string") return redactString(root, counts) as T;
+  if (root === null || typeof root !== "object") return root;
+
+  const out: Json = Array.isArray(root) ? [] : {};
+  const stack: Frame[] = [makeFrame(root, out)];
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.i >= frame.keys.length) {
+      stack.pop();
+      continue;
+    }
+
+    let v: Json | undefined;
+    let assign: (child: Json) => void;
+    if (frame.kind === "array") {
+      const i = frame.keys[frame.i++]!;
+      v = frame.src[i];
+      assign = (child) => {
+        frame.container[i] = child;
+      };
+    } else {
+      const k = frame.keys[frame.i++]!;
+      v = frame.src[k];
+      if (v === undefined) continue; // JSON.stringify would drop it; be explicit.
+      assign = (child) => {
+        frame.container[k] = child;
+      };
+    }
+
+    if (typeof v === "string") assign(redactString(v, counts));
+    // Array elements can legitimately be `undefined` (unlike object
+    // properties, already filtered above) — preserved as-is, matching the
+    // previous `Array.prototype.map` behavior.
+    else if (v === null || typeof v !== "object") assign(v as Json);
+    else {
+      const child: Json = Array.isArray(v) ? [] : {};
+      assign(child);
+      stack.push(makeFrame(v, child));
+    }
+  }
   return out as T;
 }
