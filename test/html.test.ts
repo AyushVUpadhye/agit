@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgitEvent } from "../src/format/events.js";
 import { renderSessionHtml } from "../src/html.js";
 
-function event(
-  seq: number,
-  type: AgitEvent["type"],
-  payload: AgitEvent["payload"],
-): AgitEvent {
+function event(seq: number, type: AgitEvent["type"], payload: AgitEvent["payload"]): AgitEvent {
   return {
     v: 1,
     seq,
@@ -113,8 +109,59 @@ describe("renderSessionHtml", () => {
       headHash: "hash-1",
     };
 
-    expect(renderSessionHtml(events, meta)).toBe(
-      renderSessionHtml(events, meta),
+    expect(renderSessionHtml(events, meta)).toBe(renderSessionHtml(events, meta));
+  });
+
+  it("emits a viewer script that actually parses", () => {
+    // The bug this guards: the page is built from one template literal, so a
+    // newline escape written inside a JS string there becomes a real line
+    // break in the emitted script, splitting the string. The HTML still
+    // *contains* every expected substring, so string assertions pass while
+    // the exported page throws SyntaxError and renders nothing at all.
+    const html = renderSessionHtml(
+      [
+        event(0, "session.start", { runtime: "claude", runtimeVersion: "1.0", cwd: "/tmp/p" }),
+        event(1, "message.user", { text: "Hello" }),
+        event(2, "file.diff", {
+          path: "a.ts",
+          kind: "modify",
+          diff: ["--- a/a.ts", "+++ b/a.ts", "@@ -1 +1 @@", "-x", "+y", ""].join("\n"),
+          beforeHash: "b",
+          afterHash: "a",
+        }),
+      ],
+      null,
     );
+    const scripts = [...html.matchAll(/<script(?![^>]*application\/json)[^>]*>([\s\S]*?)<\/script>/g)];
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const [, body] of scripts) {
+      expect(() => new Function(body!)).not.toThrow();
+    }
+  });
+
+  it("keeps newline escapes intact in the emitted script", () => {
+    const html = renderSessionHtml(
+      [
+        event(0, "session.start", { runtime: "claude", runtimeVersion: "1.0", cwd: "/tmp/p" }),
+        event(1, "message.user", { text: "Hello" }),
+        event(2, "file.diff", {
+          path: "a.ts",
+          kind: "modify",
+          diff: ["--- a/a.ts", "+++ b/a.ts", "@@ -1 +1 @@", "-x", "+y", ""].join("\n"),
+          beforeHash: "b",
+          afterHash: "a",
+        }),
+      ],
+      null,
+    );
+    const script = [...html.matchAll(/<script(?![^>]*application\/json)[^>]*>([\s\S]*?)<\/script>/g)]
+      .map((m) => m[1]!)
+      .join("\n");
+    // A double-quoted string must never span a raw line break, which is what
+    // an unescaped newline inside the page template produces.
+    for (const line of script.split("\n")) {
+      const quotes = (line.match(/(?<!\\)"/g) ?? []).length;
+      expect(quotes % 2, `unbalanced quotes: ${line.trim().slice(0, 70)}`).toBe(0);
+    }
   });
 });

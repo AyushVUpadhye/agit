@@ -348,21 +348,21 @@ function select(seq) {
         "pre",
         "",
         str(p.kind) + " " + str(p.path) +
-        "\nbefore " + (p.beforeHash || "∅") +
-        "\nafter  " + str(p.afterHash)
+        "\\nbefore " + (p.beforeHash || "∅") +
+        "\\nafter  " + str(p.afterHash)
       )
     );
 
     var pre = el("pre", "");
 
-    str(p.diff).split("\n").forEach(function (line) {
+    str(p.diff).split("\\n").forEach(function (line) {
       var cls =
         line.charAt(0) === "+" ? "add" :
         line.charAt(0) === "-" ? "del" :
         line.slice(0, 2) === "@@" ? "hunk" :
         "";
 
-      pre.appendChild(el("span", cls, line + "\n"));
+      pre.appendChild(el("span", cls, line + "\\n"));
     });
 
     detail.appendChild(pre);
@@ -385,7 +385,7 @@ function renderFiles() {
     var added = 0;
     var removed = 0;
 
-    diff.split("\n").forEach(function (line) {
+    diff.split("\\n").forEach(function (line) {
       if (line.charAt(0) === "+" && line.slice(0, 3) !== "+++") {
         added++;
       } else if (line.charAt(0) === "-" && line.slice(0, 3) !== "---") {
@@ -472,7 +472,7 @@ function renderMeta() {
     lines.push("chain head: " + str(meta.headHash));
   }
 
-  metaBox.textContent = lines.join("\n");
+  metaBox.textContent = lines.join("\\n");
 }
 
 events.forEach(addEvent);
