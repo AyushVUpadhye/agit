@@ -1,8 +1,34 @@
+/**
+ * Adapter for OpenClaw session transcripts (JSONL, one entry per line).
+ *
+ * Mapping rules follow SPEC.md section 6: linearize in native file order,
+ * preserve native ids under payload.native, skip and count what cannot be
+ * mapped, never guess.
+ *
+ * Derived from OpenClaw'''s own type definitions rather than from a captured
+ * log, and each shape below was checked against them:
+ *   - the header entry, src/config/sessions/transcript-header.ts:
+ *       { type: "session", version, id, timestamp, cwd, parentSession? }
+ *   - the message entry, src/agents/sessions/session-manager-types.ts:
+ *       SessionMessageEntry { type: "message", id, parentId, timestamp, message }
+ *   - roles user | assistant | toolResult, content parts text | thinking |
+ *     toolCall, and Usage { input, output, cacheRead, cacheWrite, cost },
+ *     packages/llm-core/src/types.ts
+ *
+ * Not yet exercised against a real OpenClaw transcript: unmapped entry types
+ * are skip-counted and named in  output, so a real log that
+ * disagrees says so rather than failing silently. If one contradicts this
+ * adapter, the adapter is what'''s wrong.
+ *
+ * No file.diff events: OpenClaw'''s transcript records tool calls and their
+ * text results, and nothing observed in these types carries structured
+ * before/after file content, so there is nothing here to hash honestly.
+ */
 import type { DraftEvent, Json } from "../format/events.js";
 import type { Adapter, ConvertOptions, ConvertResult } from "./adapter.js";
 
 const ADAPTER_NAME = "openclaw";
-const ADAPTER_VERSION = "1";
+const ADAPTER_VERSION = "0.1.0";
 
 type RecordValue = { [key: string]: Json };
 
@@ -22,21 +48,38 @@ function textContent(content: unknown): string {
     .join("\n");
 }
 
-function usagePayload(message: RecordValue): { [key: string]: Json } | undefined {
-  const usage = asRecord(message.usage);
-  const cost = asRecord(usage?.cost);
-  if (!usage || !cost) return undefined;
+function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
 
+/**
+ * A cost event in the shape the other adapters emit: model, four token
+ * counts, and everything runtime-specific under native. Token fields are
+ * coerced to numbers so a field missing from one record cannot make two
+ * imports of the same log differ (SPEC §7).
+ *
+ * OpenClaw's Usage carries `cost` as well, and it is kept — under native,
+ * because SPEC's cost payload counts tokens and says nothing about money.
+ */
+function usagePayload(message: RecordValue, native: Json): { [key: string]: Json } | undefined {
+  const usage = asRecord(message.usage);
+  if (!usage) return undefined;
+  const cost = asRecord(usage.cost);
+
+  const nativeRecord = asRecord(native) ?? {};
   return {
-    ...(typeof message.model === "string" ? { model: message.model } : {}),
-    ...(typeof message.provider === "string" ? { provider: message.provider } : {}),
+    model: typeof message.model === "string" ? message.model : null,
     usage: {
-      inputTokens: usage.input as Json,
-      outputTokens: usage.output as Json,
-      cacheReadInputTokens: usage.cacheRead as Json,
-      cacheCreationInputTokens: usage.cacheWrite as Json,
+      inputTokens: num(usage.input),
+      outputTokens: num(usage.output),
+      cacheReadInputTokens: num(usage.cacheRead),
+      cacheCreationInputTokens: num(usage.cacheWrite),
     },
-    cost: cost.total as Json,
+    native: {
+      ...nativeRecord,
+      ...(typeof message.provider === "string" ? { provider: message.provider } : {}),
+      ...(cost && typeof cost.total === "number" ? { costUsd: cost.total } : {}),
+    },
   };
 }
 
@@ -67,6 +110,7 @@ export const openclawAdapter: Adapter = {
     let firstTs = "";
     let lastTs = "";
     let cwd: string | undefined;
+    let sessionFormatVersion: Json = null;
 
     const skip = (reason: string) => {
       skipped[reason] = (skipped[reason] ?? 0) + 1;
@@ -100,6 +144,7 @@ export const openclawAdapter: Adapter = {
         if (!sessionId && typeof record.id === "string") {
           sessionId = record.id;
           cwd = typeof record.cwd === "string" ? record.cwd : undefined;
+          sessionFormatVersion = typeof record.version === "number" ? record.version : null;
         }
         continue;
       }
@@ -116,6 +161,12 @@ export const openclawAdapter: Adapter = {
       }
 
       const role = message.role;
+      // SPEC §6: keep the runtime's own ids, so the transcript DAG survives
+      // the mapping and events can be traced back to their source records.
+      const native: Json = {
+        id: typeof record.id === "string" ? record.id : null,
+        parentId: typeof record.parentId === "string" ? record.parentId : null,
+      };
 
       if (role === "user") {
         const text = textContent(message.content);
@@ -127,13 +178,19 @@ export const openclawAdapter: Adapter = {
         drafts.push({
           ts,
           type: "message.user",
-          payload: { text },
+          payload: { text, native },
         });
         continue;
       }
 
       if (role === "assistant") {
         const content = Array.isArray(message.content) ? message.content : [];
+        // One native message becomes one message.assistant carrying its
+        // blocks, plus a tool.call per call — the same shape the Claude Code
+        // and Codex adapters emit. Every view reads `blocks`, so a payload
+        // without it renders as an empty assistant turn.
+        const blocks: Json[] = [];
+        const toolCalls: DraftEvent[] = [];
 
         for (const partValue of content) {
           const part = asRecord(partValue);
@@ -148,16 +205,7 @@ export const openclawAdapter: Adapter = {
               skip(`assistant:${String(part.type)}(empty)`);
               continue;
             }
-
-            drafts.push({
-              ts,
-              type: "message.assistant",
-              payload: {
-                text,
-                ...(part.type === "thinking" ? { thinking: true } : {}),
-                ...(typeof message.model === "string" ? { model: message.model } : {}),
-              },
-            });
+            blocks.push({ type: part.type === "thinking" ? "thinking" : "text", text });
             continue;
           }
 
@@ -167,13 +215,14 @@ export const openclawAdapter: Adapter = {
               continue;
             }
 
-            drafts.push({
+            toolCalls.push({
               ts,
               type: "tool.call",
               payload: {
                 toolUseId: part.id,
                 name: part.name,
                 input: (asRecord(part.arguments) ?? {}) as Json,
+                native,
               },
             });
             continue;
@@ -182,7 +231,21 @@ export const openclawAdapter: Adapter = {
           skip(`assistant:content:${String(part.type ?? "unknown")}`);
         }
 
-        const usage = usagePayload(message);
+        if (blocks.length > 0) {
+          drafts.push({
+            ts,
+            type: "message.assistant",
+            payload: {
+              model: typeof message.model === "string" ? message.model : null,
+              blocks,
+              stopReason: typeof message.stopReason === "string" ? message.stopReason : null,
+              native,
+            },
+          });
+        }
+        drafts.push(...toolCalls);
+
+        const usage = usagePayload(message, native);
         if (usage) {
           drafts.push({
             ts,
@@ -208,6 +271,7 @@ export const openclawAdapter: Adapter = {
             name: message.toolName,
             output: textContent(message.content),
             isError: message.isError === true,
+            native,
           },
         });
         continue;
@@ -225,8 +289,13 @@ export const openclawAdapter: Adapter = {
 
     const startPayload: { [key: string]: Json } = {
       runtime: "openclaw",
+      // The header carries a session-format version, not an OpenClaw
+      // version, so it goes under native rather than being passed off as one.
+      runtimeVersion: null,
       nativeSessionId: sessionId,
+      gitBranch: null,
       adapter: { name: ADAPTER_NAME, version: ADAPTER_VERSION },
+      native: { sessionFormatVersion: sessionFormatVersion },
     };
 
     if (cwd !== undefined) startPayload.cwd = cwd;
