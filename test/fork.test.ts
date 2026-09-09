@@ -51,6 +51,45 @@ describe("reconstructTree", () => {
     );
   });
 
+  it("does not resurrect a file after a file.delete event", () => {
+    const content = "hello\n";
+    const events = buildChain("delete-test", [
+      {
+        ts: "2026-09-08T11:00:00.000Z",
+        type: "session.start",
+        payload: { runtime: "codex", cwd: "C:\\work\\app" },
+      },
+      {
+        ts: "2026-09-08T11:00:01.000Z",
+        type: "file.diff",
+        payload: {
+          path: "C:\\work\\app\\hello.py",
+          kind: "create",
+          diff: "--- /dev/null\n+++ b/hello.py\n@@ -0,0 +1 @@\n+hello\n",
+          beforeHash: null,
+          afterHash: sha256Hex(content),
+          toolUseId: "call_add",
+          source: "apply_patch",
+        },
+      },
+      {
+        ts: "2026-09-08T11:00:02.000Z",
+        type: "file.delete",
+        payload: {
+          path: "C:\\work\\app\\hello.py",
+          beforeHash: sha256Hex(content),
+          toolUseId: "call_delete",
+          source: "apply_patch",
+        },
+      },
+    ]);
+
+    const { files, skipped } = reconstructTree(events, events.length - 1);
+
+    expect(skipped).toEqual([]);
+    expect(files).toEqual([]);
+  });
+
   it("time-travels: state at an earlier event is the earlier content", () => {
     const firstDiff = SIMPLE.find((e) => e.type === "file.diff")!;
     const { files } = reconstructTree(SIMPLE, firstDiff.seq);

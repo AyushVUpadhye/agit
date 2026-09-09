@@ -20,6 +20,8 @@ export interface FileState {
    * process). Undefined means "no contradiction observed", not "unchanged".
    */
   divergedAtSeq?: number;
+  /** Seq of the structured deletion that removed the file. A later edit of the same path clears it. */
+  deletedAtSeq?: number;
 }
 
 /** Fold file.diff events up to and including seq `at` (default: all). Lower bound on reality — SPEC §5.7. */
@@ -27,6 +29,28 @@ export function fileStateAt(events: AgitEvent[], at?: number): Map<string, FileS
   const files = new Map<string, FileState>();
   for (const e of events) {
     if (at !== undefined && e.seq > at) break;
+    if (e.type === "file.delete") {
+      const d = e.payload as { path?: Json; beforeHash?: Json };
+      if (typeof d.path !== "string") continue;
+      const prev = files.get(d.path);
+      // A deletion's beforeHash is a claim about the content that was removed;
+      // if it contradicts the last content we know, something edited the file
+      // outside structured edits first — the same proof file.diff gives.
+      const contradicted =
+        prev !== undefined && typeof d.beforeHash === "string" && d.beforeHash !== prev.afterHash;
+      files.set(d.path, {
+        path: d.path,
+        kind: prev?.kind ?? "modify",
+        afterHash: prev?.afterHash ?? "",
+        lastSeq: e.seq,
+        edits: (prev?.edits ?? 0) + 1,
+        added: prev?.added ?? 0,
+        removed: prev?.removed ?? 0,
+        divergedAtSeq: prev?.divergedAtSeq ?? (contradicted ? e.seq : undefined),
+        deletedAtSeq: e.seq,
+      });
+      continue;
+    }
     if (e.type !== "file.diff") continue;
     const p = e.payload as { path?: Json; kind?: Json; afterHash?: Json; beforeHash?: Json; diff?: Json };
     if (typeof p.path !== "string" || typeof p.afterHash !== "string") continue;
@@ -157,10 +181,36 @@ export function usageByModel(events: AgitEvent[], at?: number): ModelUsage[] {
     return m;
   };
 
-  let current: string | null = null;
+  // Every model named anywhere in the window. With exactly one, there is no
+  // attribution question to be honest about: every edit is its.
+  const named = new Set<string>();
   for (const e of events) {
     if (at !== undefined && e.seq > at) break;
+    const m = (e.payload as { model?: Json }).model;
+    if (typeof m === "string" && m !== "") named.add(m);
+  }
+  const only = named.size === 1 ? [...named][0]! : null;
+
+  // Codex names the model on the assistant message that *ends* a turn, after
+  // its tool calls; Claude Code names it on the one that starts the turn.
+  // So an edit with nothing before it looks forward to the end of its turn.
+  const modelLaterInTurn = (from: number): string | null => {
+    for (let j = from + 1; j < events.length; j++) {
+      const e = events[j]!;
+      if (at !== undefined && e.seq > at) break;
+      if (e.type === "message.user") break;
+      const m = (e.payload as { model?: Json }).model;
+      if (typeof m === "string" && m !== "") return m;
+    }
+    return null;
+  };
+
+  let current: string | null = null;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    if (at !== undefined && e.seq > at) break;
     const p = e.payload as { model?: Json; usage?: { [k: string]: Json }; path?: Json };
+    if (e.type === "message.user") current = null; // a new turn: nothing precedes yet
     if (typeof p.model === "string" && p.model !== "") current = p.model;
 
     if (e.type === "cost") {
@@ -174,7 +224,7 @@ export function usageByModel(events: AgitEvent[], at?: number): ModelUsage[] {
       continue;
     }
     if (e.type === "file.diff" && typeof p.path === "string") {
-      bucket(current ?? UNATTRIBUTED).files.add(p.path);
+      bucket(current ?? modelLaterInTurn(i) ?? only ?? UNATTRIBUTED).files.add(p.path);
     }
   }
 
@@ -213,6 +263,8 @@ export function eventLine(e: AgitEvent): string {
       const { added, removed } = diffStat(str(p.diff));
       return `file.diff      ${str(p.kind)} ${str(p.path)} (+${added} -${removed})`;
     }
+    case "file.delete":
+      return `file.delete    ${str(p.path)}`;
     case "cost": {
       const u = (p.usage ?? {}) as { [k: string]: Json };
       return `cost           ${str(p.model)} in=${num(u.inputTokens)} out=${num(u.outputTokens)} cacheRead=${num(u.cacheReadInputTokens)}`;

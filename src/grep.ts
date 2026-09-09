@@ -69,7 +69,7 @@ export function grepEvents(
     if (opts.path) {
       // Path mode asks a narrower question than the rendered line answers:
       // which sessions touched this file, not which lines mention it.
-      if (e.type !== "file.diff") continue;
+      if (e.type !== "file.diff" && e.type !== "file.delete") continue;
       const p = (e.payload as { path?: Json }).path;
       if (typeof p !== "string" || !matches(p)) continue;
     } else if (!matches(eventLine(e))) {

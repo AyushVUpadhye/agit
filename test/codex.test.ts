@@ -192,6 +192,74 @@ describe("codex adapter", () => {
     expect(notes).toMatchObject({ kind: "create", afterHash: sha("# notes\n\n- shipped\n") });
   });
 
+  it("emits a verified file.delete when prior content is known", () => {
+    const content = "hello\n";
+
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-09-08T11:00:01.000Z",
+        type: "session_meta",
+        payload: {
+          id: "0199delete-0000-7aaa-8bbb-ccccdddd0001",
+          timestamp: "2026-09-08T11:00:00.000Z",
+          cwd: "C:\\work\\app",
+          originator: "Codex CLI",
+          cli_version: "0.142.0",
+          source: "terminal",
+          model_provider: "openai",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-09-08T11:00:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "patch_apply_end",
+          call_id: "call_add",
+          turn_id: "turn-1",
+          success: true,
+          changes: {
+            "C:\\work\\app\\hello.py": {
+              type: "add",
+              content,
+            },
+          },
+          status: "completed",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-09-08T11:00:03.000Z",
+        type: "event_msg",
+        payload: {
+          type: "patch_apply_end",
+          call_id: "call_delete",
+          turn_id: "turn-1",
+          success: true,
+          changes: {
+            "C:\\work\\app\\hello.py": {
+              type: "delete",
+              content,
+            },
+          },
+          status: "completed",
+        },
+      }),
+    ];
+
+    const res = codexAdapter.convert(lines);
+    const deletes = res.drafts.filter((d) => d.type === "file.delete");
+
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toMatchObject({
+      type: "file.delete",
+      payload: {
+        path: "C:\\work\\app\\hello.py",
+        beforeHash: sha(content),
+        toolUseId: "call_delete",
+        source: "apply_patch",
+      },
+    });
+  });
+
   it("orders a multi-file patch by path so imports stay byte-identical", () => {
     // Rust serializes `changes` from a HashMap; its order is not stable, and
     // the fixture deliberately lists z, a, m in that order.
@@ -208,8 +276,6 @@ describe("codex adapter", () => {
     expect(res.skipped).toMatchObject({
       // Codex records only the diff for a file that predates the session.
       "patch_apply:update(base content not in log)": 1,
-      // SPEC has eight event types and none of them is a deletion.
-      "patch_apply:delete(no deletion event in SPEC)": 1,
       // Nothing reached disk for these two.
       "patch_apply:failed": 1,
       "patch_apply:declined": 1,

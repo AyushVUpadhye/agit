@@ -193,6 +193,7 @@ function chipClass(t) {
     "tool.call": "toolcall",
     "tool.result": "toolresult",
     "file.diff": "filediff",
+    "file.delete": "filediff",
     "cost": "cost"
   }[t] || "";
 }
@@ -240,6 +241,9 @@ function summary(e) {
 
     case "file.diff":
       return str(p.kind) + " " + str(p.path);
+
+    case "file.delete":
+      return "delete " + str(p.path);
 
     case "cost": {
       var u = p.usage || {};
@@ -378,6 +382,14 @@ function renderFiles() {
   var files = Object.create(null);
 
   events.forEach(function (e) {
+    if (e.type === "file.delete") {
+      var dp = str((e.payload || {}).path);
+      var df = files[dp] || { added: 0, removed: 0, edits: 0, kind: "delete" };
+      df.kind = "delete";
+      df.edits++;
+      files[dp] = df;
+      return;
+    }
     if (e.type !== "file.diff") return;
 
     var p = e.payload || {};
@@ -404,6 +416,7 @@ function renderFiles() {
     f.added += added;
     f.removed += removed;
     f.edits++;
+    if (f.kind === "delete") f.kind = str(p.kind) || "modify"; // re-created after a deletion
     files[path] = f;
   });
 
@@ -427,7 +440,7 @@ function renderFiles() {
       el(
         "span",
         f.kind === "create" ? "plus" : "",
-        f.kind === "create" ? "A" : "M"
+        f.kind === "create" ? "A" : f.kind === "delete" ? "D" : "M"
       )
     );
 

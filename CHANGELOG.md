@@ -5,7 +5,64 @@ Notable changes to agit. The event format itself is versioned separately
 
 ## Unreleased
 
+### Changed
+
+- **Schema v2: `file.delete`** (#30, #51). A ninth event type records a
+  structured deletion with the SHA-256 of the content removed, so `fork` and
+  `diff` no longer write a deleted file back, `replay --state` and `show`
+  mark it `D`, and `grep --path` finds it. The Codex adapter emits it from
+  `apply_patch` deletions, preferring the content Codex recorded at deletion
+  over agit's own reconstruction. **Every existing v1 log keeps working**:
+  readers accept v1 and v2, a v1 log simply cannot contain `file.delete`,
+  and nothing is rewritten — v1 hashes still recompute. New logs are
+  written as v2.
+
+### Fixed
+
+- **Redaction no longer misses a key glued to a preceding identifier**
+  (#53). Patterns with a distinctive prefix (`sk-ant-`, `sk-proj-`, `ghp_`,
+  `github_pat_`, `AKIA`, `xoxb-`, `AIza`, `sk_live_`, `npm_`) drop their
+  leading word-boundary anchor — the prefix is the boundary. The generic
+  `sk-` shape keeps its anchor so ordinary hyphenated words survive.
+- **`fork` says why a file could not be rebuilt, in words that are true**
+  (#55): it distinguishes "no recorded originalFile" from "the recorded
+  originalFile does not hash to beforeHash", and when the payload carries a
+  redaction marker it says so — a redacted diff can never reproduce a hash
+  recorded before redaction.
+- **`show --by-model` attributes Codex edits** (#56). Codex names the model
+  on the assistant message that ends a turn, after its tool calls; an edit
+  with nothing before it now looks forward to the end of its turn, and a
+  session naming exactly one model credits everything to it. A session with
+  no cost events prints a sentence instead of a row of zeros.
+- **`grep --type` rejects unknown event types** with the list of real ones,
+  and `--path` refuses a contradicting `--type` (#57).
+- **CLI hygiene** (#58): `replay --at` outside the session is refused like
+  `fork` instead of silently clamped; a `--dir` that does not exist is named
+  instead of reading as an empty store; `agit diff <fork-dir>` counts work
+  since the fork point, as its header says; the `grep` help line fits its
+  column.
+- **`export-html --at N`** exports the prefix up to event N, and the command
+  reports the page size with a hint above 10 MB (#59).
+- **`share` and `export` no longer publish a chain that does not verify**
+  (#54). Every verb that publishes or hands off a stored session — `share`,
+  `export`, `export-html`, `fork`, `pr` — now goes through one gate that
+  refuses outright and names the failing check and the event it failed at:
+  `refusing to share: chain verification failed — event 1: hash does not
+  recompute`. The gate reads `meta.json` too, so a truncated log is caught
+  everywhere, not only by `verify`. Live shares are unaffected: they build
+  their chain as they tail the native log.
+
 ### Added
+
+- **`agit import --all` and `--latest`** (#60). Discovery of the supported
+  runtimes' own log directories — Claude Code, Codex, OpenClaw — importing
+  what is new and reporting what grew (`updated 22 → 40 events`). A
+  directory listing plus the ordinary import: no daemon, no hooks, no
+  watcher, and retroactive import stays the default. `--since 7d` bounds
+  the scan. "New" is exact, not heuristic: each stored session's `meta.json`
+  records the sha256 of its source, so a second `agit import <file>` now
+  says `unchanged` instead of silently re-importing, and a missing file is
+  named instead of surfacing as a raw ENOENT.
 
 - **`agit import` adopts agit bundles**, closing the receiving half of
   `agit pr` (#28): hand someone a bundle directory or a bare `events.jsonl`
