@@ -51,9 +51,19 @@ const PATTERNS: Pattern[] = [
     // A plain `\bpassword\b` misses every one of those SCREAMING_SNAKE_CASE
     // or prefixed forms: `_` and `-` are word characters to `\b`, so there is
     // no boundary between them and the keyword that follows.
+    //
+    // The prefix group bounds BOTH the run length (`{1,32}`) and the repeat
+    // count (`{0,4}`) — an earlier `(?:[A-Za-z0-9]+[_-])*` here was
+    // catastrophically slow (quadratic-or-worse) on any long run of ordinary
+    // word characters, secret or not, because the unbounded `+` had to
+    // backtrack the full remaining length looking for a `_`/`-` that might
+    // never appear, at every position the regex engine anchors to. Real
+    // identifier segments are never anywhere near 32 characters or 4 levels
+    // deep, so the bound costs no real matches while making the worst case a
+    // small constant instead of the whole remaining string.
     label: "assignment",
     regexes: [
-      /((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|apikey|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|token|passwd|password|dsn|connection[_-]?string|authorization)\s*[=:]\s*["']?)([A-Za-z0-9_\-./+]{16,})/gi,
+      /((?:[A-Za-z0-9]{1,32}[_-]){0,4}(?:api[_-]?key|apikey|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|token|passwd|password|dsn|connection[_-]?string|authorization)\s*[=:]\s*["']?)([A-Za-z0-9_\-./+]{16,})/gi,
     ],
     replacement: "$1[REDACTED:assignment]",
   },

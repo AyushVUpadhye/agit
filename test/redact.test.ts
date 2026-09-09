@@ -125,4 +125,19 @@ describe("redaction (SPEC §8)", () => {
     expect(out).toEqual({ a: ["[REDACTED:slack-token]", { b: "[REDACTED:aws-access-key-id]" }], n: 3 });
     expect(counts).toEqual({ "slack-token": 1, "aws-access-key-id": 1 });
   });
+
+  it("assignment does not catastrophically backtrack on a long ordinary string", () => {
+    // Regression for a real bug: the earlier `(?:[A-Za-z0-9]+[_-])*` prefix
+    // had an unbounded inner `+` that backtracked the full remaining length
+    // hunting for a separator that never appears — quadratic-or-worse, and
+    // it did not need a real secret or even an underscore to trigger: any
+    // long run of ordinary word characters (a base64 blob, a hex hash, a
+    // long identifier — all common in real tool output) was enough. A
+    // hostile or merely large session log could hang `agit import`/`agit
+    // share` for minutes. This must stay well under a second.
+    const start = Date.now();
+    const out = run("a".repeat(500_000)).out;
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(out).toHaveLength(500_000); // untouched: no keyword, nothing to redact
+  });
 });
