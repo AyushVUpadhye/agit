@@ -15,20 +15,17 @@
  *     toolCall, and Usage { input, output, cacheRead, cacheWrite, cost },
  *     packages/llm-core/src/types.ts
  *
- * Not yet exercised against a real OpenClaw transcript: unmapped entry types
- * are skip-counted and named in  output, so a real log that
- * disagrees says so rather than failing silently. If one contradicts this
- * adapter, the adapter is what'''s wrong.
- *
- * No file.diff events: OpenClaw'''s transcript records tool calls and their
- * text results, and nothing observed in these types carries structured
- * before/after file content, so there is nothing here to hash honestly.
+ * Structured apply_patch calls can emit file.diff when the full file state
+ * can be established from earlier edits in the same session. Updates whose
+ * base content is unknown are skipped rather than guessed.
  */
+import { createHash } from "node:crypto";
+import { applyUnifiedDiff } from "../patch.js";
 import type { DraftEvent, Json } from "../format/events.js";
 import type { Adapter, ConvertOptions, ConvertResult } from "./adapter.js";
 
 const ADAPTER_NAME = "openclaw";
-const ADAPTER_VERSION = "0.1.0";
+const ADAPTER_VERSION = "0.2.0";
 
 type RecordValue = { [key: string]: Json };
 
@@ -50,6 +47,21 @@ function textContent(content: unknown): string {
 
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function toolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  for (const partValue of content) {
+    const part = asRecord(partValue);
+    if (!part) continue;
+
+    if (typeof part.text === "string") return part.text;
+    if (typeof part.content === "string") return part.content;
+  }
+
+  return "";
 }
 
 /**
@@ -83,6 +95,182 @@ function usagePayload(message: RecordValue, native: Json): { [key: string]: Json
   };
 }
 
+function sha256Utf8(s: string): string {
+  return createHash("sha256").update(s, "utf8").digest("hex");
+}
+
+function fileDiffPayload(
+  path: string,
+  before: string | null,
+  after: string,
+  diff: string,
+  toolUseId: string,
+): { [key: string]: Json } {
+  return {
+    path,
+    kind: before === null ? "create" : "modify",
+    diff,
+    beforeHash: before === null ? null : sha256Utf8(before),
+    afterHash: sha256Utf8(after),
+    toolUseId,
+    source: "apply_patch",
+  };
+}
+
+type PendingPatch = {
+  ts: string;
+  toolUseId: string;
+  changes: Json;
+};
+
+function emitOpenClawFileDiffs(
+  pending: PendingPatch,
+  result: RecordValue,
+  body: DraftEvent[],
+  known: Map<string, string>,
+  skip: (reason: string) => void,
+): void {
+  if (result.isError === true) {
+    skip("apply_patch:error");
+    return;
+  }
+
+  const resultText = toolResultText(result.content);
+  let resultObject: RecordValue | undefined;
+
+  try {
+    resultObject = asRecord(JSON.parse(resultText));
+  } catch {
+    skip("apply_patch:malformed-result");
+    return;
+  }
+
+  if (!resultObject) {
+    skip("apply_patch:malformed-result");
+    return;
+  }
+
+  if (resultObject.status !== "completed") {
+    skip(`apply_patch:${String(resultObject.status ?? "not completed")}`);
+    return;
+  }
+
+  if (!Array.isArray(pending.changes)) {
+    skip("apply_patch:no changes");
+    return;
+  }
+
+  for (const changeValue of pending.changes) {
+    const change = asRecord(changeValue);
+
+    if (!change) {
+      skip("apply_patch:malformed change");
+      continue;
+    }
+
+    const path = typeof change.path === "string" ? change.path : "";
+    const kindRecord = asRecord(change.kind);
+    const kind =
+      kindRecord && typeof kindRecord.type === "string"
+        ? kindRecord.type
+        : "";
+
+    if (!path || !kind) {
+      skip("apply_patch:malformed change");
+      continue;
+    }
+
+    const diff = typeof change.diff === "string" ? change.diff : "";
+
+    if (kind === "add") {
+      if (!diff) {
+        skip("apply_patch:add(no content)");
+        continue;
+      }
+
+      body.push({
+        ts: pending.ts,
+        type: "file.diff",
+        payload: fileDiffPayload(
+          path,
+          null,
+          diff,
+          synthesizeCreateDiff(path, diff),
+          pending.toolUseId,
+        ),
+      });
+
+      known.set(path, diff);
+      continue;
+    }
+
+    if (kind === "update") {
+      if (!diff) {
+        skip("apply_patch:update(no diff)");
+        continue;
+      }
+
+      const movePath = kindRecord?.move_path;
+      if (typeof movePath === "string" && movePath !== "") {
+        skip("apply_patch:update(rename)");
+        continue;
+      }
+
+      const before = known.get(path);
+
+      if (before === undefined) {
+        skip("apply_patch:update(base content not in log)");
+        continue;
+      }
+
+      let after: string;
+
+      try {
+        after = applyUnifiedDiff(before, diff);
+      } catch {
+        skip("apply_patch:update(diff did not apply)");
+        continue;
+      }
+
+      body.push({
+        ts: pending.ts,
+        type: "file.diff",
+        payload: fileDiffPayload(
+          path,
+          before,
+          after,
+          diff,
+          pending.toolUseId,
+        ),
+      });
+
+      known.set(path, after);
+      continue;
+    }
+
+    if (kind === "delete") {
+      known.delete(path);
+      skip("apply_patch:delete(no deletion event in SPEC)");
+      continue;
+    }
+
+    skip(`apply_patch:${kind}`);
+  }
+}
+
+function synthesizeCreateDiff(path: string, content: string): string {
+  const lines = content.endsWith("\n")
+    ? content.slice(0, -1).split("\n")
+    : content.split("\n");
+
+  return (
+    `--- /dev/null\n+++ b/${path}\n` +
+    `@@ -0,0 +1,${lines.length} @@\n` +
+    lines.map((line) => `+${line}`).join("\n") +
+    "\n"
+  );
+}
+
 export const openclawAdapter: Adapter = {
   name: ADAPTER_NAME,
   version: ADAPTER_VERSION,
@@ -111,6 +299,8 @@ export const openclawAdapter: Adapter = {
     let lastTs = "";
     let cwd: string | undefined;
     let sessionFormatVersion: Json = null;
+    const known = new Map<string, string>();
+    const pendingPatches = new Map<string, PendingPatch>();
 
     const skip = (reason: string) => {
       skipped[reason] = (skipped[reason] ?? 0) + 1;
@@ -215,16 +405,29 @@ export const openclawAdapter: Adapter = {
               continue;
             }
 
+            const input = (asRecord(part.arguments) ?? {}) as Json;
+
             toolCalls.push({
               ts,
               type: "tool.call",
               payload: {
                 toolUseId: part.id,
                 name: part.name,
-                input: (asRecord(part.arguments) ?? {}) as Json,
+                input,
                 native,
               },
             });
+
+            if (part.name === "apply_patch") {
+              const inputRecord = asRecord(input);
+
+              pendingPatches.set(part.id, {
+                ts,
+                toolUseId: part.id,
+                changes: inputRecord?.changes ?? null,
+              });
+            }
+
             continue;
           }
 
@@ -274,6 +477,24 @@ export const openclawAdapter: Adapter = {
             native,
           },
         });
+
+        if (message.toolName === "apply_patch") {
+          const pending = pendingPatches.get(message.toolCallId);
+
+          if (pending) {
+            emitOpenClawFileDiffs(
+              pending,
+              message,
+              drafts,
+              known,
+              skip,
+            );
+            pendingPatches.delete(message.toolCallId);
+          } else {
+            skip("apply_patch:missing-call");
+          }
+        }
+
         continue;
       }
 

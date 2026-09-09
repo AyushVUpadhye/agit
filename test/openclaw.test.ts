@@ -52,7 +52,7 @@ describe("openclaw adapter", () => {
     expect(start.cwd).toBe("/workspace/demo");
     expect(start.adapter).toEqual({
       name: "openclaw",
-      version: "0.1.0",
+      version: "0.2.0",
     });
   });
 
@@ -193,4 +193,248 @@ describe("openclaw adapter", () => {
     });
     expect(res.drafts.map((d) => d.type)).toEqual(["session.start", "session.end"]);
   });
+
+  it("maps OpenClaw apply_patch add and update to file.diff", () => {
+    const addContent = "hello from OpenClaw\n";
+    const updateDiff =
+      "@@ -1 +1 @@\n" +
+      "-hello from OpenClaw\n" +
+      "+hello from OpenClaw - edited\n";
+
+    const lines = [
+      JSON.stringify({
+        type: "session",
+        version: 1,
+        id: "openclaw-apply-patch",
+        timestamp: "2026-09-09T10:00:00.000Z",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-1",
+        parentId: null,
+        timestamp: "2026-09-09T10:00:01.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.6-luna",
+          content: [{
+            type: "toolCall",
+            id: "patch-1",
+            name: "apply_patch",
+            arguments: {
+              changes: [{
+                path: "C:\\\\workspace\\\\test.txt",
+                kind: { type: "add" },
+                stat: { added: 1, removed: 0 },
+                diff: addContent,
+              }],
+            },
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-2",
+        parentId: "msg-1",
+        timestamp: "2026-09-09T10:00:02.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "patch-1",
+          toolName: "apply_patch",
+          isError: false,
+          content: [{
+            type: "toolResult",
+            text: JSON.stringify({
+              status: "completed",
+              changes: [{
+                path: "C:\\\\workspace\\\\test.txt",
+                kind: { type: "add" },
+              }],
+            }),
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-3",
+        parentId: "msg-2",
+        timestamp: "2026-09-09T10:00:03.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.6-luna",
+          content: [{
+            type: "toolCall",
+            id: "patch-2",
+            name: "apply_patch",
+            arguments: {
+              changes: [{
+                path: "C:\\\\workspace\\\\test.txt",
+                kind: { type: "update", move_path: null },
+                stat: { added: 1, removed: 1 },
+                diff: updateDiff,
+              }],
+            },
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-4",
+        parentId: "msg-3",
+        timestamp: "2026-09-09T10:00:04.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "patch-2",
+          toolName: "apply_patch",
+          isError: false,
+          content: [{
+            type: "toolResult",
+            text: JSON.stringify({
+              status: "completed",
+              changes: [{
+                path: "C:\\\\workspace\\\\test.txt",
+                kind: { type: "update", move_path: null },
+              }],
+            }),
+          }],
+        },
+      }),
+    ];
+
+    const result = openclawAdapter.convert(lines);
+    const fileDiffs = result.drafts.filter((event) => event.type === "file.diff");
+
+    expect(fileDiffs).toHaveLength(2);
+
+    const create = payloadOf(fileDiffs, 0);
+    expect(create.kind).toBe("create");
+    expect(create.path).toBe("C:\\\\workspace\\\\test.txt");
+    expect(create.beforeHash).toBe(null);
+    expect(create.toolUseId).toBe("patch-1");
+    expect(create.source).toBe("apply_patch");
+    expect(String(create.diff)).toContain("--- /dev/null");
+    expect(String(create.diff)).toContain("hello from OpenClaw");
+
+    const modify = payloadOf(fileDiffs, 1);
+    expect(modify.kind).toBe("modify");
+    expect(modify.path).toBe("C:\\\\workspace\\\\test.txt");
+    expect(modify.toolUseId).toBe("patch-2");
+    expect(modify.source).toBe("apply_patch");
+    expect(modify.diff).toBe(updateDiff);
+    expect(modify.beforeHash).not.toBe(null);
+    expect(modify.afterHash).not.toBe(null);
+
+    const toolResultIndexes = result.drafts
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === "tool.result");
+
+    const fileDiffIndexes = result.drafts
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === "file.diff");
+
+    expect(fileDiffIndexes[0]!.index).toBe(toolResultIndexes[0]!.index + 1);
+    expect(fileDiffIndexes[1]!.index).toBe(toolResultIndexes[1]!.index + 1);
+  });
+
+  it("skips OpenClaw apply_patch update when base content is unknown", () => {
+    const lines = [
+      JSON.stringify({
+        type: "session",
+        version: 1,
+        id: "openclaw-unknown-base",
+        timestamp: "2026-09-09T10:00:00.000Z",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-1",
+        timestamp: "2026-09-09T10:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: [{
+            type: "toolCall",
+            id: "patch-unknown",
+            name: "apply_patch",
+            arguments: {
+              changes: [{
+                path: "C:\\\\workspace\\\\unknown.txt",
+                kind: { type: "update", move_path: null },
+                diff: "@@ -1 +1 @@\n-old\n+new\n",
+              }],
+            },
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-2",
+        timestamp: "2026-09-09T10:00:02.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "patch-unknown",
+          toolName: "apply_patch",
+          isError: false,
+          content: [{
+            type: "toolResult",
+            text: JSON.stringify({ status: "completed" }),
+          }],
+        },
+      }),
+    ];
+
+    const result = openclawAdapter.convert(lines);
+
+    expect(result.drafts.filter((event) => event.type === "file.diff")).toHaveLength(0);
+    expect(result.skipped["apply_patch:update(base content not in log)"]).toBe(1);
+  });
+
+  it("does not emit OpenClaw file.diff for failed apply_patch", () => {
+    const lines = [
+      JSON.stringify({
+        type: "session",
+        version: 1,
+        id: "openclaw-failed-patch",
+        timestamp: "2026-09-09T10:00:00.000Z",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-1",
+        timestamp: "2026-09-09T10:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: [{
+            type: "toolCall",
+            id: "patch-failed",
+            name: "apply_patch",
+            arguments: {
+              changes: [{
+                path: "C:\\\\workspace\\\\test.txt",
+                kind: { type: "add" },
+                diff: "hello\n",
+              }],
+            },
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-2",
+        timestamp: "2026-09-09T10:00:02.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "patch-failed",
+          toolName: "apply_patch",
+          isError: true,
+          content: [{
+            type: "toolResult",
+            text: JSON.stringify({ status: "failed" }),
+          }],
+        },
+      }),
+    ];
+
+    const result = openclawAdapter.convert(lines);
+
+    expect(result.drafts.filter((event) => event.type === "file.diff")).toHaveLength(0);
+    expect(result.skipped["apply_patch:error"]).toBe(1);
+  });
+
 });
